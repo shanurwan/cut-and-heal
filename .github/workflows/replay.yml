@@ -1,0 +1,100 @@
+name: replay
+
+# Run a scenario as replicate runs on fresh clusters, then build one report from them.
+# Every published report in this repository names the run of this workflow that produced it,
+# so anyone can read its logs, download its evidence, or run it again.
+
+on:
+  workflow_dispatch:
+    inputs:
+      scenario:
+        description: Scenario name, without path or extension
+        required: true
+        default: iran-2019-11
+      seeds:
+        description: JSON list of seeds, one replicate run each
+        required: true
+        default: "[1, 2, 3]"
+
+permissions:
+  contents: read
+
+jobs:
+  run:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: ${{ fromJSON(inputs.seeds) }}
+    env:
+      RUN_ID: ${{ inputs.scenario }}-seed${{ matrix.seed }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -e ".[report]"
+      - name: Load the traffic-control modules
+        run: |
+          sudo modprobe sch_netem || {
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq "linux-modules-extra-$(uname -r)"
+            sudo modprobe sch_netem
+          }
+          sudo modprobe -a sch_prio sch_ingress cls_u32 act_gact
+      - name: Raise limits for a few hundred pods on one machine
+        run: |
+          sudo sysctl -w fs.inotify.max_user_instances=8192 fs.inotify.max_user_watches=1048576
+          sudo sysctl -w net.ipv4.neigh.default.gc_thresh1=4096 net.ipv4.neigh.default.gc_thresh2=8192 net.ipv4.neigh.default.gc_thresh3=16384
+      - name: Create a cluster with one node per region
+        run: |
+          regions="$(python -c "import sys; from cutandheal.model import load_scenario; print(' '.join(load_scenario(sys.argv[1]).regions))" "scenarios/${{ inputs.scenario }}.yaml")"
+          cluster/up.sh $regions
+          echo "KUBECONFIG=$PWD/.kube/kubeconfig.yaml" >> "$GITHUB_ENV"
+          { nproc; free -g | sed -n 2p; uname -r; } | tr '\n' ' '
+      - run: cluster/load-image.sh cut-and-heal:replay
+      - name: Run
+        run: >-
+          cah run "scenarios/${{ inputs.scenario }}.yaml" --run-id "$RUN_ID" --seed "${{ matrix.seed }}"
+          --controller-image cut-and-heal:replay --keep
+      - name: Judge
+        if: always()
+        run: cah analyze "runs/$RUN_ID" --show-invalid || true
+      - name: Cluster state on failure
+        if: failure()
+        run: |
+          kubectl get pods -A -o wide | tail -40 || true
+          kubectl -n cah logs controller --tail=60 || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: run-${{ env.RUN_ID }}
+          path: runs/${{ env.RUN_ID }}
+          if-no-files-found: ignore
+
+  report:
+    needs: run
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -e ".[report]"
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: run-*
+          path: runs
+      - name: Report across replicates
+        run: |
+          for d in runs/run-*; do mv "$d" "runs/${d#runs/run-}"; done
+          cah report runs/* --out report
+          cat report/report.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: report-${{ inputs.scenario }}
+          path: report
