@@ -1,0 +1,86 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit:
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        python: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+      - run: pip install -e ".[dev]"
+      - run: ruff check .
+      - run: ruff format --check .
+      - run: pytest -q
+      - name: Shipped scenarios are valid
+        run: for s in scenarios/*.yaml; do cah validate "$s"; done
+
+  # The compiled tc commands against a real kernel: a cut must block both directions.
+  netem:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Load netem (not in the runner's default kernel modules)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq "linux-modules-extra-$(uname -r)"
+          sudo modprobe -a sch_netem sch_prio sch_ingress cls_u32 act_gact
+      - run: bash tests/netem/run.sh
+
+  # The whole pipeline on a throwaway K3s cluster: deploy, cut, bridge, heal, collect, judge.
+  e2e:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -e ".[report]"
+      - name: Load netem
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq "linux-modules-extra-$(uname -r)"
+          sudo modprobe -a sch_netem sch_prio sch_ingress cls_u32 act_gact
+      - name: Create cluster
+        run: |
+          cluster/up.sh inside outside
+          echo "KUBECONFIG=$PWD/.kube/kubeconfig.yaml" >> "$GITHUB_ENV"
+      - run: cluster/load-image.sh cut-and-heal:ci
+      - name: Run the smoke scenario
+        run: cah run scenarios/smoke.yaml --run-id ci --controller-image cut-and-heal:ci --keep
+      - name: Judge the run
+        run: |
+          cah analyze runs/ci --show-invalid
+          cah report runs/ci --out runs/ci/report
+          cat runs/ci/report/report.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Cluster state on failure
+        if: failure()
+        run: |
+          kubectl get pods -A -o wide || true
+          kubectl -n cah logs controller --tail=80 || true
+          kubectl -n cah describe pods | tail -80 || true
+          docker logs cah-control 2>&1 | tail -40 || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: smoke-run
+          path: runs/ci
+          if-no-files-found: ignore
