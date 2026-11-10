@@ -1,0 +1,12 @@
+__pycache__/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.venv/
+dist/
+build/
+
+# Evidence from local runs. Published runs live under reports/.
+runs/
+.kube/
+.preview/

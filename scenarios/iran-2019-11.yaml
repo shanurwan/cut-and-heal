@@ -1,0 +1,73 @@
+# Iran, 16-27 November 2019: the international internet was cut for about five days while the
+# domestic network stayed up, then restored in steps.
+#
+# What comes from data: the order of the phases and how open the border was in each.
+# What is an assumption: link delays and rates, the size of each region, and reading "share
+# of normal cross-border traffic" as "share of nodes that still have a border link".
+# What is deliberately not kept: durations. Eleven days are replayed in 33 minutes; each phase
+# is long enough for the protocol to settle, not proportional to the real one.
+name: iran-2019-11
+title: Iran, November 2019 - international shutdown with a live domestic network
+
+source:
+  event: Nationwide international internet shutdown, Iran, 16-27 November 2019
+  dataset: IODA gtr-norm (traffic to Google services, normalised), country IR
+  url: https://ioda.live/country/IR?from=1573603200&until=1575590400
+  window_utc: ["2019-11-13", "2019-12-06"]
+  retrieved: "2026-11-10"
+  method: >-
+    cah trace --country IR --start 2019-11-13 --end 2019-12-06 --baseline-days 3.
+    Each sample is divided by the median of the same half-hour slot over 13-15 November,
+    then segmented at levels 0, 0.02, 0.1, 0.5, 1. The 111 hours from 16 Nov 19:00 UTC sat
+    between 0.7% and 1.9% and are replayed as one phase.
+
+regions:
+  ir:
+    nodes: 50
+    description: Nodes inside the country, on the domestic network
+    domestic: {delay_ms: 20, jitter_ms: 4, rate_mbit: 50}
+  world:
+    nodes: 100
+    description: Nodes everywhere else
+    domestic: {delay_ms: 50, jitter_ms: 10, rate_mbit: 50}
+
+borders:
+  ir-world:
+    between: [ir, world]
+    gated: ir
+    healthy: {delay_ms: 100, jitter_ms: 20, loss_pct: 0.5, rate_mbit: 20}
+
+# The bootstrap node is abroad, where projects usually host them.
+bootstrap_region: world
+
+publish:
+  rate_hz: 1
+  size_bytes: 1000
+
+timeline:
+  - name: baseline
+    duration_s: 240
+    note: Before 16 Nov 19:00 UTC. Availability 1.00.
+  - name: shutdown
+    duration_s: 600
+    note: 16 Nov 19:00 to 21 Nov 10:00 UTC, 111 h. Median availability 0.7% to 1.9%; 0 of 50 nodes.
+    borders:
+      ir-world: {open_nodes: 0}
+  - name: trickle
+    duration_s: 300
+    note: 21 Nov 10:00 to 22 Nov 20:00 UTC, 34 h. Median availability 3.6%; 2 of 50 nodes.
+    borders:
+      ir-world: {open_fraction: 0.036}
+  - name: partial-10
+    duration_s: 240
+    note: 22 Nov 20:00 to 23 Nov 12:00 UTC, 16 h. Median availability 9.5%; 5 of 50 nodes.
+    borders:
+      ir-world: {open_fraction: 0.095}
+  - name: partial-60
+    duration_s: 300
+    note: 23 Nov 12:00 to 27 Nov 15:00 UTC, 99 h. Median availability 59%; 30 of 50 nodes.
+    borders:
+      ir-world: {open_fraction: 0.59}
+  - name: restored
+    duration_s: 300
+    note: From 27 Nov 15:00 UTC. Availability 1.00.

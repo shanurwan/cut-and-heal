@@ -1,0 +1,36 @@
+# Sensitivity run for the weakest assumption in the model: how many nodes inside still have
+# a border link. Same regions and links as iran-2019-11, with the open count stepped through
+# 0, 1, 2 and 5 and held for a full phase each. Each step follows a full shutdown, so every
+# step starts from the same state: no cross-border connection left alive.
+name: open-nodes-sweep
+title: How many open nodes does a region need? (sensitivity run for iran-2019-11)
+
+regions:
+  ir:
+    nodes: 50
+    domestic: {delay_ms: 20, jitter_ms: 4, rate_mbit: 50}
+  world:
+    nodes: 100
+    domestic: {delay_ms: 50, jitter_ms: 10, rate_mbit: 50}
+
+borders:
+  ir-world:
+    between: [ir, world]
+    gated: ir
+    healthy: {delay_ms: 100, jitter_ms: 20, loss_pct: 0.5, rate_mbit: 20}
+
+bootstrap_region: world
+
+publish:
+  rate_hz: 1
+  size_bytes: 1000
+
+timeline:
+  - {name: baseline, duration_s: 240}
+  - {name: shut-a, duration_s: 300, borders: {ir-world: {open_nodes: 0}}}
+  - {name: open-1, duration_s: 300, borders: {ir-world: {open_nodes: 1}}}
+  - {name: shut-b, duration_s: 300, borders: {ir-world: {open_nodes: 0}}}
+  - {name: open-2, duration_s: 300, borders: {ir-world: {open_nodes: 2}}}
+  - {name: shut-c, duration_s: 300, borders: {ir-world: {open_nodes: 0}}}
+  - {name: open-5, duration_s: 300, borders: {ir-world: {open_nodes: 5}}}
+  - {name: restored, duration_s: 300}

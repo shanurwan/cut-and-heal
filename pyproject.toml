@@ -1,0 +1,52 @@
+[project]
+name = "cut-and-heal"
+version = "0.1.0"
+description = "Replay real internet outages against peer-to-peer messaging and measure what still gets delivered"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+authors = [{ name = "Wan Nur Shafiqah" }]
+dependencies = [
+  "aiohttp>=3.9,<4",
+  "numpy>=1.26",
+  "pydantic>=2.6,<3",
+  "pyyaml>=6",
+]
+
+[project.optional-dependencies]
+report = ["matplotlib>=3.8"]
+dev = ["pytest>=8", "pytest-asyncio>=0.23", "ruff>=0.6", "matplotlib>=3.8"]
+
+[project.scripts]
+cah = "cutandheal.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/cutandheal"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+markers = ["netem: needs Docker and NET_ADMIN; shapes real links between containers"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "S", "ASYNC"]
+ignore = [
+  "S101", # asserts are the point of tests
+  "S603", "S607", # kubectl and docker are invoked by name, with fixed argument lists
+  "S311", # seeded shuffles for reproducibility, not for secrets
+  "S104", # the controller listens on the pod network by design
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S", "E501"] # tests quote real log lines verbatim
+# The controller writes a handful of small files once, after the timeline has ended.
+"src/cutandheal/controller.py" = ["ASYNC240"]

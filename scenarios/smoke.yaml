@@ -1,0 +1,38 @@
+# The smallest scenario that exercises every mechanism: a full cut, one bridging node, a heal.
+# CI runs it end to end on a throwaway cluster. It is a test of the harness, not a finding.
+name: smoke
+title: Harness smoke test - cut, one bridge, heal
+
+regions:
+  inside:
+    nodes: 6
+    domestic: {delay_ms: 10, jitter_ms: 2}
+  outside:
+    nodes: 8
+    domestic: {delay_ms: 20, jitter_ms: 4}
+
+borders:
+  edge:
+    between: [inside, outside]
+    gated: inside
+    healthy: {delay_ms: 50, jitter_ms: 10}
+
+bootstrap_region: outside
+
+publish:
+  rate_hz: 2
+  size_bytes: 500
+
+timeline:
+  - name: baseline
+    duration_s: 60
+  - name: cut
+    duration_s: 60
+    borders:
+      edge: {open_nodes: 0}
+  - name: one-bridge
+    duration_s: 60
+    borders:
+      edge: {open_nodes: 1}
+  - name: healed
+    duration_s: 90
