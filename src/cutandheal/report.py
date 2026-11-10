@@ -210,7 +210,7 @@ def write_report(run_dirs: list[Path], out: Path) -> Path:
         f"- System under test: `{images.get('node', 'unknown')}`.",
         f"- {len(runs)} run(s): {run_list}.",
         f"- A pair (message, receiving node) counts as delivered within {DEFAULTS.deadline_s:g} s. Steady-state "
-        f"figures exclude the first {DEFAULTS.guard_s:g} s of each phase.",
+        f"figures cover the last {DEFAULTS.steady_fraction:.0%} of each phase.",
         "",
         "## Validity",
         "",

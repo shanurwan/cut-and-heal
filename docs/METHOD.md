@@ -46,7 +46,7 @@ event or a policy to propagate.
 | Pair | One message and one node other than its origin. |
 | Delivered | The node logged the message within `deadline_s` (10 s) of the send time carried in the payload. |
 | Late | Logged after the deadline. Counted separately, never as delivered. Reported beside the delivery ratio. |
-| Steady window | Messages sent at least `guard_s` (20 s) after a phase starts and at least `deadline_s` before it ends. |
+| Steady window | Messages sent in the last half of a phase, never in its first `guard_s` (20 s), and at least `deadline_s` before it ends. |
 | Delivery ratio | Delivered pairs over all pairs, for one phase, origin region and receiving region. |
 | Interval | 95% bootstrap interval over messages (2,000 resamples). Pairs from one message are not independent, so messages are resampled, not pairs. |
 | Settle time | Seconds from the start of a phase to the last message whose ratio was more than 0.01 below that phase's steady ratio. |
@@ -129,4 +129,5 @@ how the result depends on that one number.
 |---|---|---|---|
 | 2026-11-11 | V4 | Judged by receive time instead of send time. Was: no pair delivered, on time or late, between regions with no path in the phase the message was sent. | The first end-to-end run failed V4 with every cross-border message of a 60 s cut marked late and none on time. The shapers' counters showed the border dropping packets throughout. The messages arrived after the border reopened: the TCP connections had stalled, not died, and delivered what they had buffered. That is delivery over a path that exists again, and a result worth reporting, not a leak. The original wording could not tell the two apart. |
 | 2026-11-11 | none (V2 limit unchanged) | Three 150-node runs of `iran-2019-11` on a 4-CPU machine were withdrawn under V2: shapers applied phases up to 1,950 ms late against a 500 ms limit, while every other rule passed. | Each shaper forked `date`, one `tc` per command and `curl` on waking, and 150 of them woke at once. The shaper now forks once per phase or not at all. The limit stays where it was set. |
+| 2026-11-11 | Steady window | The last half of each phase. Was: everything after the first 20 s. | In the withdrawn 150-node runs, cross-border delivery took about 100 s to resume after two nodes reopened. A 20 s guard put most of that transition inside the "steady" figure, which then described neither the transition nor the level reached. Settle time is measured against the amended level. Predictions P1 to P7 are judged as written. |
 | 2026-11-11 | V7 | The start line is `Host info`. | The pinned image does not log `Node started`. |

@@ -40,8 +40,8 @@ def test_a_clean_run_is_valid_and_its_numbers_are_exact(tmp_path, scn, topo) -> 
     base = _cell(cs, "baseline", "inside", "outside")
     assert base.ratio == 1.0 and base.p50_ms == 120.0 and base.path_exists
     # Steady window of a 60 s phase at 1 msg/s, alternating two origin regions:
-    # sends at 20..50 s inclusive, 31 messages, 15 or 16 from each region.
-    assert base.messages in (15, 16)
+    # sends at 30..50 s inclusive, 21 messages, 10 or 11 from each region.
+    assert base.messages in (10, 11)
     assert base.pairs == base.messages * 6
 
     cut = _cell(cs, "cut", "inside", "outside")

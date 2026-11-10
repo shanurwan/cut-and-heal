@@ -22,7 +22,10 @@ class Params:
     deadline_s: float = 10.0
     """A pair counts as delivered only within this long of the send."""
     guard_s: float = 20.0
-    """Messages sent this soon after a phase starts are transition, not steady state."""
+    """Messages sent this soon after a phase starts are never steady state."""
+    steady_fraction: float = 0.5
+    """Steady state is measured over this last share of a phase. A fixed guard assumes every
+    transition is short; the first 150-node runs showed one lasting about 100 s."""
     settle_tolerance: float = 0.01
     """A message is 'below steady' if its delivery ratio is this far under the phase's level."""
     bootstrap_resamples: int = 2000
@@ -99,9 +102,10 @@ def _in_window(msg: Message, phase: PhaseWindow, window: str, p: Params) -> bool
         return False
     if window == "whole":
         return True
-    # Steady: past the transition, and early enough that the delivery deadline falls inside
-    # the phase, so the next phase cannot take credit or blame.
-    return phase.start_ms + p.guard_s * 1000 <= t <= phase.end_ms - p.deadline_s * 1000
+    # Steady: the last part of the phase, never the first `guard_s`, and early enough that the
+    # delivery deadline falls inside the phase, so the next phase cannot take credit or blame.
+    begin = phase.end_ms - p.steady_fraction * (phase.end_ms - phase.start_ms)
+    return max(begin, phase.start_ms + p.guard_s * 1000) <= t <= phase.end_ms - p.deadline_s * 1000
 
 
 def cells(run: Run, p: Params = DEFAULTS) -> list[Cell]:
