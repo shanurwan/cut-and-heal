@@ -159,6 +159,72 @@ def fig_bridge_load(run: Run, path: Path) -> bool:
     return True
 
 
+def mesh_reaction(run: Run, change: float = 0.1) -> list[dict]:
+    """When, after each phase began, a region's mean mesh size first moved by more than
+    `change` from its value at the start of the phase. None means it never did.
+
+    This is how long the mesh took to *notice*: a node whose peers have been cut off keeps
+    counting them as mesh members until its connections to them time out.
+    """
+    out = []
+    for series in load_metric(run.path, "mesh_mean_by_region"):
+        region = series["labels"].get("region", "?")
+        for ph in run.phases[1:]:
+            pts = [(t, v) for t, v in zip(series["t"], series["v"], strict=True) if ph.start_ms <= t < ph.end_ms]
+            if not pts or pts[0][1] <= 0:
+                continue
+            start = pts[0][1]
+            moved = next((t for t, v in pts if abs(v - start) / start > change), None)
+            out.append(
+                {
+                    "phase": ph.name,
+                    "region": region,
+                    "mesh_at_start": round(start, 2),
+                    "mesh_at_end": round(pts[-1][1], 2),
+                    "reacted_after_s": None if moved is None else round((moved - ph.start_ms) / 1000),
+                }
+            )
+    return out
+
+
+def bridge_load(run: Run) -> list[dict]:
+    """Bytes sent per node in steady state: nodes with the border open against the rest of
+    their region, for every phase where only some nodes are open."""
+    import numpy as np
+
+    per_pod = load_metric(run.path, "bytes_out_rate_by_pod")
+    out = []
+    for border_id, border in sorted(run.scenario.borders.items()):
+        total = run.scenario.regions[border.gated].nodes
+        order = open_order(run.scenario, run.topology, border_id, run.seed)
+        for ph in run.phases:
+            count = run.scenario.open_count(run.scenario.timeline[ph.index], border_id)
+            if not 0 < count < total:
+                continue
+            opened = set(order[:count])
+            begin = ph.end_ms - DEFAULTS.steady_fraction * (ph.end_ms - ph.start_ms)
+            means: dict[bool, list[float]] = {True: [], False: []}
+            for series in per_pod:
+                if series["labels"].get("region") != border.gated:
+                    continue
+                vals = [v for t, v in zip(series["t"], series["v"], strict=True) if begin <= t < ph.end_ms]
+                if vals:
+                    means[series["labels"].get("pod") in opened].append(sum(vals) / len(vals))
+            if means[True] and means[False]:
+                a, b = float(np.median(means[True])), float(np.median(means[False]))
+                out.append(
+                    {
+                        "phase": ph.name,
+                        "border": border_id,
+                        "open_nodes": count,
+                        "open_bytes_per_s": round(a),
+                        "other_bytes_per_s": round(b),
+                        "ratio": round(a / b, 2) if b else None,
+                    }
+                )
+    return out
+
+
 def _fmt_ratio(values: list[float]) -> str:
     if not values:
         return "n/a"
@@ -288,6 +354,47 @@ def write_report(run_dirs: list[Path], out: Path) -> Path:
             vals = [t.settle_s for _r, _cs, trs, *_ in valid for t in trs if (t.phase, t.src, t.dst) == (ph.name, s, d)]
             row.append(", ".join(f"{v:g}" for v in vals) if vals else "no path")
         md.append(f"| {ph.name} | " + " | ".join(row) + " |")
+
+    reactions = [(r.record.get("run_id"), mesh_reaction(r)) for r, *_ in valid]
+    if any(rows for _id, rows in reactions):
+        md += [
+            "",
+            "## When the mesh noticed",
+            "",
+            "Seconds after each change until a region's mean mesh size first moved by more than 10%. One value "
+            "per valid run; *never* means it stayed within 10% for the whole phase. A node keeps counting "
+            "unreachable peers as mesh members until its connections to them time out.",
+            "",
+            "| Phase | Region | Mesh size at start | at end | Reacted after (s) |",
+            "|---|---|---|---|---|",
+        ]
+        keys = sorted({(row["phase"], row["region"]) for _id, rows in reactions for row in rows},
+                      key=lambda k: ([p.name for p in valid[0][0].phases].index(k[0]), k[1]))  # fmt: skip
+        for phase, region in keys:
+            rows = [row for _id, rs in reactions for row in rs if (row["phase"], row["region"]) == (phase, region)]
+            at_start = sum(row["mesh_at_start"] for row in rows) / len(rows)
+            at_end = sum(row["mesh_at_end"] for row in rows) / len(rows)
+            reacted = ", ".join(
+                "never" if row["reacted_after_s"] is None else str(row["reacted_after_s"]) for row in rows
+            )
+            md.append(f"| {phase} | {region} | {at_start:.1f} | {at_end:.1f} | {reacted} |")
+    loads = [row for r, *_ in valid for row in bridge_load(r)]
+    if loads:
+        md += [
+            "",
+            "## Load on the nodes that keep the border",
+            "",
+            "Median bytes sent per second in steady state: nodes with the border open against the other nodes "
+            "of their region. One row per valid run.",
+            "",
+            "| Phase | Open nodes | Open nodes (B/s) | Other nodes (B/s) | Ratio |",
+            "|---|---|---|---|---|",
+        ]
+        md += [
+            f"| {row['phase']} | {row['open_nodes']} | {row['open_bytes_per_s']} | {row['other_bytes_per_s']} | "
+            f"{row['ratio']} |"
+            for row in sorted(loads, key=lambda row: [p.name for p in valid[0][0].phases].index(row["phase"]))
+        ]
 
     lead = valid[0][0]
     md += ["", "## Figures", "", f"From run `{lead.record.get('run_id')}`.", ""]
