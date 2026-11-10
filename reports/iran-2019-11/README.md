@@ -80,7 +80,7 @@ Written in [docs/METHOD.md](../../docs/METHOD.md#6-predictions) before the first
 | | |
 |---|---|
 | Evidence | [replay run 42900236972](https://github.com/shanurwan/cut-and-heal/actions/runs/42900236972): one job, one fresh K3s cluster and one seed per run, on GitHub-hosted `ubuntu-24.04` runners (4 CPUs) |
-| Raw logs | Attached to the [`evidence-iran-2019-11`](https://github.com/shanurwan/cut-and-heal/releases/tag/evidence-iran-2019-11) release: node logs, shaper logs, acknowledgements, publish record, host load and metric exports for all five runs |
+| Raw logs | Artifacts of that workflow run, one per seed: node logs, shaper logs, acknowledgements, publish record, host load and metric exports |
 | Report | `cah report` on that evidence; every number is in [results.json](results.json) |
 | Reproduce | Actions, *replay*, scenario `iran-2019-11`, seeds `[1, 2, 3, 4, 5]` |
 

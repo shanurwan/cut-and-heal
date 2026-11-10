@@ -117,8 +117,8 @@ test that produces the fault and checks the rule fires.
 `cah analyze` recomputes every number from those files.
 
 **Published results come from public runs.** The *replay* workflow runs each seed on a fresh
-cluster on a GitHub-hosted runner. A report names the workflow run that produced it, and the
-raw logs are attached to a release.
+cluster on a GitHub-hosted runner. A report names the workflow run that produced it, and
+that run's artifacts hold the raw logs.
 
 ## Run it
 
