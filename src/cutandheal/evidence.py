@@ -18,7 +18,8 @@ from .plan import Pod, Topology
 
 _SENT = re.compile(r"Sent message\s.*?msgId=(\d+) timestamp=(\d+)")
 _RECV = re.compile(r"Received message\s.*?msgId=(\d+) sentAt=(\d+) current=(\d+)")
-START_MARKER = "Node started"
+# The first line the node writes. Its absence means the log was rotated or truncated.
+START_MARKER = "Host info"
 
 
 @dataclass

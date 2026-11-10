@@ -10,3 +10,4 @@ build/
 runs/
 .kube/
 .preview/
+.ci-run/

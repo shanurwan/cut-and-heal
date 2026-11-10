@@ -13,6 +13,7 @@ import numpy as np
 
 from .analyze import Cell
 from .evidence import Run
+from .plan import expected_reach
 
 
 @dataclass(frozen=True)
@@ -22,6 +23,7 @@ class Limits:
     max_publish_late_p99_ms: int = 50
     max_publish_transport_error: float = 0.001
     max_cpu_busy_p95: float = 0.85
+    leak_guard_s: float = 2.0
 
 
 DEFAULT_LIMITS = Limits()
@@ -85,15 +87,36 @@ def _v3_baseline(run: Run, cells: list[Cell], lim: Limits) -> Verdict:
     return Verdict("V3", f"The network was healthy before anything was cut (>= {lim.baseline_min_ratio})", ok, detail)
 
 
-def _v4_no_leak(cells: list[Cell]) -> Verdict:
-    leaks = [c for c in cells if c.window == "steady" and not c.path_exists and (c.delivered or c.late)]
-    closed = [c for c in cells if c.window == "steady" and not c.path_exists]
-    detail = f"{len(closed)} closed region pairs checked, {sum(c.pairs for c in closed)} pairs, " + (
-        "none delivered"
-        if not leaks
-        else "; ".join(f"{c.phase} {c.src}->{c.dst}: {c.delivered + c.late} delivered" for c in leaks)
+def _v4_no_leak(run: Run, lim: Limits) -> Verdict:
+    """Judged by when a message was *received*, not when it was sent.
+
+    A message sent during a cut can legitimately arrive after the border reopens: its TCP
+    connection stalled, survived, and delivered what it had buffered. That is late delivery
+    over a path that exists again. A leak is a receive that happens while no path exists.
+    The guard covers packets already in flight at the instant of the cut.
+    """
+    region = {p.name: p.region for p in run.topology.pods}
+    closed_windows = []
+    for phase in run.phases:
+        reach = expected_reach(run.scenario, run.topology, phase.index, run.seed)
+        closed = {pair for pair, ok in reach.items() if not ok}
+        if closed:
+            closed_windows.append((phase.name, phase.start_ms + lim.leak_guard_s * 1000, phase.end_ms, closed))
+    leaks: dict[str, int] = {}
+    checked = 0
+    for msg in run.messages:
+        for pod, recv_ns in msg.received.items():
+            t = recv_ns / 1e6
+            for name, start, end, closed in closed_windows:
+                if start <= t < end:
+                    checked += 1
+                    if (msg.origin_region, region[pod]) in closed:
+                        key = f"{name} {msg.origin_region}->{region[pod]}"
+                        leaks[key] = leaks.get(key, 0) + 1
+    detail = f"{len(closed_windows)} phases with a closed border, {checked} receives inside them, " + (
+        "none across a closed border" if not leaks else "; ".join(f"{k}: {n} received" for k, n in leaks.items())
     )
-    return Verdict("V4", "No message crossed a border that had no open node", not leaks, detail)
+    return Verdict("V4", "No message was received across a border while it had no open node", not leaks, detail)
 
 
 def _v5_publisher(run: Run, lim: Limits) -> Verdict:
@@ -155,7 +178,7 @@ def judge(run: Run, cells: list[Cell], lim: Limits = DEFAULT_LIMITS) -> list[Ver
         _v1_topology(run),
         _v2_shaping(run, lim),
         _v3_baseline(run, cells, lim),
-        _v4_no_leak(cells),
+        _v4_no_leak(run, lim),
         _v5_publisher(run, lim),
         _v6_headroom(run, lim),
         _v7_evidence(run),

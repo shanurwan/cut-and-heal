@@ -42,7 +42,7 @@ def write_run(
     phases = [{"name": n, "start_ms": T0_MS + s * 1000, "end_ms": T0_MS + e * 1000} for n, s, e in scn.phase_windows()]
     pods = list(topo.pods)
     by_region = {r: topo.by_region(r) for r in scn.regions}
-    logs = {p.name: ["INF 2026-01-01 00:00:00.000+00:00 Node started tid=1 nodeType=regression"] for p in pods}
+    logs = {p.name: ["INF 2026-01-01 00:00:00.000+00:00 Host info tid=1 hostname=x peer=0 muxer=yamux"] for p in pods}
     publishes, regions = [], sorted(scn.regions)
     for seq in range(scn.duration_s):
         sent_ms = T0_MS + seq * 1000

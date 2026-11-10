@@ -142,7 +142,10 @@ def fig_bridge_load(run: Run, path: Path) -> bool:
     xs = [(t - t0) / 1000 for t in grid]
     for i, (label, series) in enumerate(groups.items()):
         if series:
-            ax.plot(xs, np.nanmedian(np.array(series), axis=0) / 1000, color=SERIES[i], label=f"{label} (median)")
+            arr = np.array(series)
+            arr = arr[:, ~np.isnan(arr).all(axis=0)]
+            keep = [x for x, col in zip(xs, np.isnan(np.array(series)).all(axis=0), strict=True) if not col]
+            ax.plot(keep, np.nanmedian(arr, axis=0) / 1000, color=SERIES[i], label=f"{label} (median)")
     ax.set_xlim(left=0)
     ax.set_ylim(bottom=0)
     ax.set_ylabel("kB/s sent per node")
@@ -235,7 +238,8 @@ def write_report(run_dirs: list[Path], out: Path) -> Path:
         "## Delivery in steady state",
         "",
         f"Share of (message, node) pairs delivered, mean of {len(valid)} valid run(s) with the range across runs. "
-        "*no path* marks a pair of regions with no open border between them in that phase.",
+        "*no path* marks a pair of regions with no open border between them in that phase. *late* is the share "
+        f"that arrived after the {DEFAULTS.deadline_s:g} s deadline, for example once a border reopened.",
         "",
         "| Phase | Border | " + " | ".join(f"{s} to {d}" for s, d in pairs) + " |",
         "|---|---|" + "---|" * len(pairs),
@@ -253,6 +257,9 @@ def write_report(run_dirs: list[Path], out: Path) -> Path:
                 if (c.phase, c.src, c.dst, c.window) == (ph.name, s, d, "steady") and c.pairs
             ]  # fmt: skip
             text = _fmt_ratio([c.ratio for c in got])
+            late = sum(c.late for c in got) / max(1, sum(c.pairs for c in got))
+            if late >= 0.0005:
+                text += f", {late:.1%} late"
             row.append(f"{text} *(no path)*" if got and not got[0].path_exists else text)
             lat.append(f"{_fmt_ms([c.p50_ms for c in got])} / {_fmt_ms([c.p99_ms for c in got])}")
         md.append(f"| {ph.name} | {state} | " + " | ".join(row) + " |")

@@ -45,7 +45,7 @@ event or a policy to propagate.
 |---|---|
 | Pair | One message and one node other than its origin. |
 | Delivered | The node logged the message within `deadline_s` (10 s) of the send time carried in the payload. |
-| Late | Logged after the deadline. Counted separately, never as delivered. |
+| Late | Logged after the deadline. Counted separately, never as delivered. Reported beside the delivery ratio. |
 | Steady window | Messages sent at least `guard_s` (20 s) after a phase starts and at least `deadline_s` before it ends. |
 | Delivery ratio | Delivered pairs over all pairs, for one phase, origin region and receiving region. |
 | Interval | 95% bootstrap interval over messages (2,000 resamples). Pairs from one message are not independent, so messages are resampled, not pairs. |
@@ -68,7 +68,7 @@ contributes no numbers.
 | V1 | The run completed; every pod is running at the end with zero restarts. | A restarted node rejoins with an empty mesh and looks like a protocol effect. |
 | V2 | Every pod acknowledged setup and every phase with exit code 0, each within 500 ms of schedule. | A shaper that silently failed leaves a node unshaped: the run looks healthier than the scenario. |
 | V3 | In the baseline's steady window every region pair delivered at least 99%. | A network that was not healthy before the cut makes everything after it uninterpretable. |
-| V4 | No pair was delivered, on time or late, between regions with no path. | A leaking partition. |
+| V4 | No message was received by a node while its region had no path to the origin's region, judged by receive time, from 2 s after the phase began. | A leaking partition. |
 | V5 | Publish send times are within 50 ms of schedule at the 99th percentile, and under 0.1% of publishes failed to reach a node. | A stalled load generator reads as a quiet network. |
 | V6 | Host CPU busy at the 95th percentile is at most 85%. | A saturated host stretches every latency. |
 | V7 | Logs exist for every container and contain the node's start line; the nodes' "Sent" lines match the controller's publish record pod by pod; no receive line refers to an unknown message. | Truncated or rotated logs under-count delivery without any error. |
@@ -127,3 +127,5 @@ how the result depends on that one number.
 
 | Date | Rule | Change | Reason |
 |---|---|---|---|
+| 2026-11-11 | V4 | Judged by receive time instead of send time. Was: no pair delivered, on time or late, between regions with no path in the phase the message was sent. | The first end-to-end run failed V4 with every cross-border message of a 60 s cut marked late and none on time. The shapers' counters showed the border dropping packets throughout. The messages arrived after the border reopened: the TCP connections had stalled, not died, and delivered what they had buffered. That is delivery over a path that exists again, and a result worth reporting, not a leak. The original wording could not tell the two apart. |
+| 2026-11-11 | V7 | The start line is `Host info`. | The pinned image does not log `Node started`. |

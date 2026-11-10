@@ -22,7 +22,7 @@ def _verdicts(run):
 def test_real_node_log_lines_parse() -> None:
     # Lines copied from albertodst/regression-node-amd64:v2.4.0.
     text = (
-        "INF 2026-11-10 18:47:05.107+00:00 Node started                               tid=1 nodeType=regression\n"
+        "INF 2026-11-10 19:14:01.485+00:00 Host info                                  tid=1 hostname=inside-0 peer=0 muxer=yamux\n"
         "INF 2026-11-10 18:46:18.258+00:00 Sent message                               tid=1 msgId=5871328469820093183 timestamp=1794336378259416320\n"
         "INF 2026-11-10 18:47:53.935+00:00 Received message                           tid=1 msgId=7040115899689817385 sentAt=1794336473935658752 current=1794336473936122880 delayMs=0\n"
     )
@@ -92,8 +92,23 @@ def test_the_confidence_interval_resamples_messages_not_pairs(tmp_path, scn, top
 def test_v4_catches_a_partition_that_leaks(tmp_path, scn, topo) -> None:
     run = load_run(write_run(tmp_path / "r", scn, topo, respect_borders=False))
     v = _verdicts(run)
-    assert not v["V4"].passed and "cut" in v["V4"].detail
+    assert not v["V4"].passed and "cut inside->outside" in v["V4"].detail
     assert v["V3"].passed
+
+
+def test_v4_accepts_messages_that_arrive_after_the_border_reopens(tmp_path, scn, topo) -> None:
+    # Seen in the first end-to-end run: a 60 s cut does not kill TCP connections. Messages
+    # published during it sit in send buffers and are delivered when the border reopens.
+    # They are late, they are not delivered on time, and they are not a leak.
+    def buffered(phase, origin, receiver, t):
+        crossing = origin.split("-")[0] != receiver.split("-")[0]
+        return (60 - t) * 1000 + 800 if phase == "cut" and crossing else 100.0
+
+    run = load_run(write_run(tmp_path / "r", scn, topo, buffered, respect_borders=False))
+    cs = cells(run, P)
+    assert _verdicts(run)["V4"].passed
+    cut = _cell(cs, "cut", "inside", "outside")
+    assert cut.delivered == 0 and cut.late == cut.pairs
 
 
 def test_v3_catches_an_unhealthy_baseline(tmp_path, scn, topo) -> None:

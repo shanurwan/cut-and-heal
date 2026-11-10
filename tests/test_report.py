@@ -13,7 +13,7 @@ def test_report_uses_valid_runs_and_withdraws_the_rest(tmp_path, scn, topo) -> N
     leaky = write_run(tmp_path / "c", scn, topo, respect_borders=False)
     report = write_report([good, also_good, leaky], tmp_path / "out")
     text = report.read_text(encoding="utf-8")
-    assert "| V4 No message crossed a border that had no open node | pass | pass | **FAIL** |" in text
+    assert "| V4 No message was received across a border while it had no open node | pass | pass | **FAIL** |" in text
     assert "is withdrawn and contributes no numbers" in text
     assert "mean of 2 valid run(s)" in text
     assert "| cut | 0/4 open | 100.00% | 0.00% *(no path)* | 0.00% *(no path)* | 100.00% |" in text
