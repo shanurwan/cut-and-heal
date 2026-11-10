@@ -36,11 +36,15 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - name: Load netem (not in the runner's default kernel modules)
+      - name: Load the traffic-control modules
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq "linux-modules-extra-$(uname -r)"
-          sudo modprobe -a sch_netem sch_prio sch_ingress cls_u32 act_gact
+          # Some runner kernels ship netem in the base modules, others in modules-extra.
+          sudo modprobe sch_netem || {
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq "linux-modules-extra-$(uname -r)"
+            sudo modprobe sch_netem
+          }
+          sudo modprobe -a sch_prio sch_ingress cls_u32 act_gact
       - run: bash tests/netem/run.sh
 
   # The whole pipeline on a throwaway K3s cluster: deploy, cut, bridge, heal, collect, judge.
@@ -54,11 +58,15 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: pip install -e ".[report]"
-      - name: Load netem
+      - name: Load the traffic-control modules
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq "linux-modules-extra-$(uname -r)"
-          sudo modprobe -a sch_netem sch_prio sch_ingress cls_u32 act_gact
+          # Some runner kernels ship netem in the base modules, others in modules-extra.
+          sudo modprobe sch_netem || {
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq "linux-modules-extra-$(uname -r)"
+            sudo modprobe sch_netem
+          }
+          sudo modprobe -a sch_prio sch_ingress cls_u32 act_gact
       - name: Create cluster
         run: |
           cluster/up.sh inside outside
