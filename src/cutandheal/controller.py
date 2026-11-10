@@ -126,7 +126,7 @@ def make_app(state: State) -> web.Application:
 
 
 def plan_text(scn: Scenario, topo: Topology, pod: Pod, seed: int, t0_ms: int) -> str:
-    """Wire format for the shaper: `epoch_ms|phase|tolerate|tc args`, one line per command.
+    """Wire format for the shaper: `epoch_ms|phase|tc args`, one line per command.
 
     A phase in which this pod changes nothing still gets one line with empty args, so every
     pod acknowledges every phase and a missing acknowledgement always means something.
@@ -139,9 +139,9 @@ def plan_text(scn: Scenario, topo: Topology, pod: Pod, seed: int, t0_ms: int) ->
         at = t0_ms + start_s * 1000
         steps = by_phase.get(name, [])
         if not steps:
-            lines.append(f"{at}|{name}|0|")
+            lines.append(f"{at}|{name}|")
         for s in steps:
-            lines.append(f"{at}|{name}|{int(s.tolerate_failure)}|{' '.join(s.argv)}")
+            lines.append(f"{at}|{name}|{' '.join(s.argv)}")
     return "\n".join(lines) + "\n"
 
 

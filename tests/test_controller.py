@@ -25,8 +25,8 @@ def test_every_pod_gets_a_line_for_every_phase(scn, topo) -> None:
 def test_plan_lines_carry_absolute_times_and_plain_tc_arguments(scn, topo) -> None:
     text = plan_text(scn, topo, topo.pods[0], seed=7, t0_ms=T0)
     cut = [line for line in text.splitlines() if "|cut|" in line]
-    assert all(line.startswith(f"{T0 + 60_000}|cut|0|") for line in cut)
-    assert not any(ch in text for ch in ";&$`")  # the shaper word-splits these lines into argv
+    assert all(line.startswith(f"{T0 + 60_000}|cut|") for line in cut)
+    assert not any(ch in text for ch in ";&$`")  # these lines are fed to `tc -batch`, never to a shell
 
 
 def test_publishing_is_balanced_across_regions_and_visits_every_node(scn, topo) -> None:

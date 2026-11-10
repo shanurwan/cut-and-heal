@@ -60,7 +60,6 @@ class Step:
     at_s: int
     phase: str
     argv: tuple[str, ...]
-    tolerate_failure: bool = False
 
 
 def _ordinal(pod_name: str) -> int:
