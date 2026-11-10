@@ -362,8 +362,8 @@ def write_report(run_dirs: list[Path], out: Path) -> Path:
             "## When the mesh noticed",
             "",
             "Seconds after each change until a region's mean mesh size first moved by more than 10%. One value "
-            "per valid run; *never* means it stayed within 10% for the whole phase. A node keeps counting "
-            "unreachable peers as mesh members until its connections to them time out.",
+            "per valid run; *never* means it stayed within 10% for the whole phase. The size is what each node "
+            "reports about itself, so it includes peers the node has not yet found to be unreachable.",
             "",
             "| Phase | Region | Mesh size at start | at end | Reacted after (s) |",
             "|---|---|---|---|---|",

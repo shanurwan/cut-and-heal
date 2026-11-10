@@ -30,6 +30,29 @@ public outage signal ──> scenario (regions, borders, timeline)
         validity rules ──> results, or a withdrawn run with the reason
 ```
 
+## What the first replay found
+
+Iran, November 2019, replayed against 150 nodes (50 inside, 100 outside). Four valid runs.
+
+![Share of nodes reached by each message, by origin and destination](reports/iran-2019-11/delivery.png)
+
+- **Inside the country nothing was lost.** Through ten minutes with the border fully shut,
+  every message published inside reached every inside node, with no dip at the cut.
+- **Two open nodes in fifty carried everything.** With 2 of 50 inside nodes reconnected,
+  100% of messages crossed in both directions.
+- **But only after about 104 seconds.** Nothing crossed for 103 to 107 s after those two
+  nodes reopened (64 s in one of eight measurements). I had predicted under 60.
+- **The mesh took nine minutes to notice the cut.** Inside nodes reported an unchanged mesh
+  for 535 to 574 s after the border shut.
+- **A long cut loses what was sent during it; a short one does not.** Nothing published
+  during the ten-minute shutdown ever crossed. After a 60-second cut, all of it did.
+- **Crossing outward stayed about four times slower** until the border was fully open, even
+  with 30 of 50 nodes reconnected.
+
+Seven predictions were written down before the first run; five held and two were refuted.
+The findings, the predictions, what they do not establish, and every withdrawn run are in
+[reports/iran-2019-11](reports/iran-2019-11/README.md).
+
 ## What it measures
 
 For every phase of an outage and every pair of regions:
@@ -72,9 +95,10 @@ address range and the border is a real address boundary. Three `tc` filters clas
 a pod's traffic, whatever the number of peers.
 
 **The cut lands on the clock.** Every pod's shaper holds the whole timeline before the run
-starts and applies each phase at an absolute time. In the kernel-level test, shapers apply a
-phase 2 to 5 ms after schedule. A cut that arrives through a control plane lands on each pod
-at a different moment, and the transition is the thing being measured.
+starts and applies each phase at an absolute time. With 150 pods on a 4-CPU machine, the
+median shaper applied a phase 105 ms after schedule and the slowest 335 ms after. A cut that
+arrives through a control plane lands on each pod at a different moment, and the transition
+is the thing being measured.
 
 **A partition drops both directions.** Dropping only a node's egress leaves TCP delivering
 data to a node that merely stops acknowledging it. Closed nodes drop border traffic on
@@ -91,6 +115,10 @@ test that produces the fault and checks the rule fires.
 
 **Evidence first, verdicts offline.** The controller collects raw logs and judges nothing.
 `cah analyze` recomputes every number from those files.
+
+**Published results come from public runs.** The *replay* workflow runs each seed on a fresh
+cluster on a GitHub-hosted runner. A report names the workflow run that produced it, and the
+raw logs are attached to a release.
 
 ## Run it
 
