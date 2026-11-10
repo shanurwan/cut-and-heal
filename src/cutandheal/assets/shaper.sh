@@ -8,10 +8,10 @@
 #
 # Hundreds of these wake at the same instant on the same machine. Anything a shaper forks at
 # that instant competes with every other shaper, so the wake-up path forks exactly once (one
-# `tc -batch` for the whole phase) or not at all, reads the clock from a bash builtin, and
-# sends its acknowledgement a random moment later. An earlier version called `date`, one
-# `tc` per command and `curl` on waking; at 150 pods on 4 CPUs the last pods applied a phase
-# up to 2 s late.
+# `tc -batch` for the whole phase) or not at all. It sleeps on a bash builtin timer, reads
+# the clock from a bash builtin, and sends its acknowledgement a random moment later. An
+# earlier version called `sleep`, `date`, one `tc` per command and `curl` on waking; at 150
+# pods on 4 CPUs the last pods applied a phase up to 2 s late.
 set -u
 export LC_ALL=C # EPOCHREALTIME must use a dot
 
@@ -20,6 +20,14 @@ POD="${POD_NAME:?POD_NAME is required}"
 DEV="${CAH_DEV:-eth0}"
 
 now() { NOW_MS=$((${EPOCHREALTIME/./} / 1000)); } # no fork
+
+# A timer with no process behind it: read from a descriptor that never has data.
+exec {IDLE}<> <(:)
+nap_ms() { # milliseconds
+  local t
+  printf -v t '%d.%03d' $(($1 / 1000)) $(($1 % 1000))
+  read -r -t "$t" -u "$IDLE" || true
+}
 log() { printf '%(%Y-%m-%dT%H:%M:%S)TZ shaper %s\n' -1 "$*"; }
 
 ack() { # kind phase planned_ms applied_ms rc
@@ -64,10 +72,7 @@ log "plan received phases=${#phases[@]}"
 for i in "${!phases[@]}"; do
   now
   delta=$((times[i] - NOW_MS))
-  if [ "$delta" -gt 0 ]; then
-    printf -v nap '%d.%03d' $((delta / 1000)) $((delta % 1000))
-    sleep "$nap"
-  fi
+  [ "$delta" -le 0 ] || nap_ms "$delta"
   rc=0
   if [ -n "${batches[$i]}" ]; then
     tc -batch - <<<"${batches[$i]}" || rc=1
@@ -75,10 +80,11 @@ for i in "${!phases[@]}"; do
   now
   applied=$NOW_MS
   log "phase=${phases[$i]} planned_ms=${times[$i]} applied_ms=$applied late_ms=$((applied - times[i])) rc=$rc"
-  # Acknowledge off the critical path, spread over two seconds.
-  (sleep "$((RANDOM % 2)).$((RANDOM % 900 + 100))"; ack phase "${phases[$i]}" "${times[$i]}" "$applied" "$rc") &
+  # Acknowledge off the critical path: a random moment later, so the acknowledgements of
+  # one phase are spread over three seconds instead of landing together.
+  nap_ms $((RANDOM % 2700 + 300))
+  ack phase "${phases[$i]}" "${times[$i]}" "$applied" "$rc"
 done
-wait
 
 log "timeline done"
 # Counters are evidence: a border that was really cut shows dropped packets here.

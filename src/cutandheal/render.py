@@ -86,7 +86,7 @@ def _node_statefulset(scn: Scenario, region: str, opt: RenderOptions) -> dict:
                                 {"name": "metrics", "containerPort": 8008},
                                 {"name": "publish", "containerPort": 8645},
                             ],
-                            "resources": {"requests": {"cpu": "20m", "memory": "24Mi"}},
+                            "resources": {"requests": {"cpu": "10m", "memory": "24Mi"}},
                         },
                         {
                             "name": "shaper",
@@ -100,7 +100,9 @@ def _node_statefulset(scn: Scenario, region: str, opt: RenderOptions) -> dict:
                             ],
                             "securityContext": {"capabilities": {"add": ["NET_ADMIN"]}},
                             "volumeMounts": [{"name": "shaper", "mountPath": "/shaper"}],
-                            "resources": {"requests": {"cpu": "5m", "memory": "8Mi"}},
+                            # Within a pod the shaper outranks the node for CPU: it runs for
+                            # milliseconds per phase and must not wait behind gossip to do so.
+                            "resources": {"requests": {"cpu": "15m", "memory": "8Mi"}},
                         },
                     ],
                     "volumes": [{"name": "shaper", "configMap": {"name": "shaper"}}],
