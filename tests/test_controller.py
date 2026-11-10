@@ -100,3 +100,17 @@ def test_the_controller_can_read_pods_and_nodes_and_nothing_else(scn) -> None:
     assert verbs <= {"get", "list", "watch"}
     cluster = [r for kind, _, r in rules if kind == "ClusterRole"]
     assert cluster == [{"apiGroups": [""], "resources": ["nodes"], "verbs": ["get", "list"]}]
+
+
+def test_the_dashboard_queries_only_metrics_the_run_exports(scn) -> None:
+    from cutandheal.controller import VM_QUERIES
+    from cutandheal.render import DASHBOARD_PANELS, dashboard
+
+    opt = RenderOptions(namespace="cah", run_id="r1", seed=7, controller_image="cah:test", grafana=True)
+    kinds = [(d["kind"], d["metadata"]["name"]) for d in render(scn, opt, "")]
+    assert ("Pod", "grafana") in kinds and ("ConfigMap", "grafana") in kinds
+    known = " ".join(VM_QUERIES.values())
+    for _title, expr, _unit in DASHBOARD_PANELS:
+        metric = expr.split("(")[-1].split("{")[0].split(")")[0].split("[")[0]
+        assert metric in known, metric
+    assert len({p["id"] for p in dashboard()["panels"]}) == len(DASHBOARD_PANELS)

@@ -30,6 +30,7 @@ def _options(args: argparse.Namespace) -> RenderOptions:
         seed=args.seed,
         controller_image=args.controller_image,
         metrics=not args.no_metrics,
+        grafana=args.grafana,
     )
 
 
@@ -162,6 +163,7 @@ def main(argv: list[str] | None = None) -> int:
         p.add_argument("--seed", type=int, default=1)
         p.add_argument("--controller-image", default=DEFAULT_CONTROLLER_IMAGE)
         p.add_argument("--no-metrics", action="store_true")
+        p.add_argument("--grafana", action="store_true", help="also deploy Grafana with the run dashboard")
 
     p = sub.add_parser("validate", help="check a scenario and print its timeline")
     p.add_argument("scenario")

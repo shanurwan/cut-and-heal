@@ -26,6 +26,7 @@ BOOTSTRAP_IMAGE = (
     "@sha256:d136b5f44cfd315a68e2e9680cd2b1eb7489b8566f9bfedba5349046f000d944"
 )
 VM_IMAGE = "victoriametrics/victoria-metrics:v1.156.0"
+GRAFANA_IMAGE = "grafana/grafana:11.4.0"
 CONTROL_LABEL = "cut-and-heal/control"
 
 
@@ -38,7 +39,9 @@ class RenderOptions:
     node_image: str = NODE_IMAGE
     bootstrap_image: str = BOOTSTRAP_IMAGE
     vm_image: str = VM_IMAGE
+    grafana_image: str = GRAFANA_IMAGE
     metrics: bool = True
+    grafana: bool = False
     settle_s: int = 45
     lead_s: int = 20
 
@@ -328,12 +331,118 @@ def _metrics(opt: RenderOptions) -> list[dict]:
     ]
 
 
+DASHBOARD_PANELS = [
+    ("Mesh peers per node, mean", "avg by (region) (libp2p_gossipsub_peers_per_topic_mesh)", "short"),
+    ("Mesh peers per node, lowest", "min by (region) (libp2p_gossipsub_peers_per_topic_mesh)", "short"),
+    ("Nodes with no mesh peers", "sum by (region) (libp2p_gossipsub_no_peers_topics)", "short"),
+    ("Connected peers per node, mean", "avg by (region) (libp2p_peers)", "short"),
+    ("Bytes sent", 'sum by (region) (rate(libp2p_network_bytes_total{direction="out"}[20s]))', "Bps"),
+    ("Busiest sender", 'max by (region) (rate(libp2p_network_bytes_total{direction="out"}[20s]))', "Bps"),
+    ("Dial attempts", "sum by (region) (rate(libp2p_total_dial_attempts_total[20s]))", "ops"),
+    ("Failed dials", "sum by (region) (rate(libp2p_failed_dials_total[20s]))", "ops"),
+]
+
+
+def dashboard() -> dict:
+    """One panel per question a run raises: is the mesh whole, who carries the traffic, who is redialling."""
+    panels = []
+    for i, (title, expr, unit) in enumerate(DASHBOARD_PANELS):
+        panels.append(
+            {
+                "id": i + 1,
+                "type": "timeseries",
+                "title": title,
+                "datasource": {"type": "prometheus", "uid": "metrics"},
+                "gridPos": {"h": 7, "w": 12, "x": 12 * (i % 2), "y": 7 * (i // 2)},
+                "fieldConfig": {"defaults": {"unit": unit, "min": 0, "custom": {"lineWidth": 2, "fillOpacity": 0}}},
+                "targets": [{"expr": expr, "legendFormat": "{{region}}", "refId": "A"}],
+            }
+        )
+    return {
+        "uid": "cut-and-heal",
+        "title": "cut-and-heal",
+        "timezone": "utc",
+        "refresh": "5s",
+        "time": {"from": "now-45m", "to": "now"},
+        "schemaVersion": 39,
+        "panels": panels,
+    }
+
+
+def _grafana(opt: RenderOptions) -> list[dict]:
+    ns = opt.namespace
+    labels = {ROLE_LABEL: "grafana"}
+    datasource = {
+        "apiVersion": 1,
+        "datasources": [
+            {"name": "metrics", "uid": "metrics", "type": "prometheus", "url": "http://metrics:8428", "isDefault": True}
+        ],
+    }
+    provider = {
+        "apiVersion": 1,
+        "providers": [{"name": "cut-and-heal", "type": "file", "options": {"path": "/dashboards"}}],
+    }
+    mounts = [
+        ("/etc/grafana/provisioning/datasources/datasource.yaml", "datasource.yaml"),
+        ("/etc/grafana/provisioning/dashboards/provider.yaml", "provider.yaml"),
+        ("/dashboards/cut-and-heal.json", "cut-and-heal.json"),
+    ]
+    env = {
+        # A read-only viewer on a cluster-internal service; reach it with a port-forward.
+        "GF_AUTH_ANONYMOUS_ENABLED": "true",
+        "GF_AUTH_ANONYMOUS_ORG_ROLE": "Viewer",
+        "GF_AUTH_DISABLE_LOGIN_FORM": "true",
+        "GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH": "/dashboards/cut-and-heal.json",
+    }
+    return [
+        {
+            "apiVersion": "v1",
+            "kind": "ConfigMap",
+            "metadata": _meta("grafana", ns),
+            "data": {
+                "datasource.yaml": yaml.safe_dump(datasource, sort_keys=False),
+                "provider.yaml": yaml.safe_dump(provider, sort_keys=False),
+                "cut-and-heal.json": json.dumps(dashboard(), indent=1),
+            },
+        },
+        {
+            "apiVersion": "v1",
+            "kind": "Service",
+            "metadata": _meta("grafana", ns),
+            "spec": {"selector": labels, "ports": [{"port": 3000}]},
+        },
+        {
+            "apiVersion": "v1",
+            "kind": "Pod",
+            "metadata": _meta("grafana", ns, **labels),
+            "spec": {
+                "nodeSelector": {CONTROL_LABEL: "true"},
+                "enableServiceLinks": False,
+                "automountServiceAccountToken": False,
+                "containers": [
+                    {
+                        "name": "grafana",
+                        "image": opt.grafana_image,
+                        "env": [{"name": k, "value": v} for k, v in env.items()],
+                        "ports": [{"containerPort": 3000}],
+                        "volumeMounts": [{"name": "config", "mountPath": m, "subPath": f} for m, f in mounts],
+                        "resources": {"requests": {"cpu": "100m", "memory": "128Mi"}},
+                    }
+                ],
+                "volumes": [{"name": "config", "configMap": {"name": "grafana"}}],
+            },
+        },
+    ]
+
+
 def render(scn: Scenario, opt: RenderOptions, scenario_yaml: str) -> list[dict]:
     """Manifests in apply order: control plane first, so shapers find the controller."""
     docs: list[dict] = [{"apiVersion": "v1", "kind": "Namespace", "metadata": {"name": opt.namespace}}]
     docs += _controller(scn, opt, scenario_yaml)
     if opt.metrics:
         docs += _metrics(opt)
+        if opt.grafana:
+            docs += _grafana(opt)
     docs += _bootstrap(scn, opt)
     docs.append(
         {
