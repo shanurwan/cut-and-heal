@@ -69,7 +69,9 @@ def cmd_run(args: argparse.Namespace) -> int:
     status = ""
     while time.monotonic() < deadline:
         done = _kubectl("exec", "-n", ns, "controller", "--", "cat", "/results/DONE", check=False)
-        if done.returncode == 0:
+        # An exec that exits 0 with no output is not a result: under load the stream can
+        # close before the data arrives. Only a non-empty DONE ends the wait.
+        if done.returncode == 0 and done.stdout.strip():
             status = done.stdout.strip()
             break
         st = _kubectl(
@@ -92,7 +94,14 @@ def cmd_run(args: argparse.Namespace) -> int:
         print(f"no result after {budget}s; leaving namespace {ns} in place for inspection", file=sys.stderr)
         return 1
     out.parent.mkdir(parents=True, exist_ok=True)
-    _kubectl("cp", f"{ns}/controller:/results", str(out))
+    for _attempt in range(5):
+        copied = _kubectl("cp", f"{ns}/controller:/results", str(out), check=False)
+        if copied.returncode == 0 and (out / "run.json").exists():
+            break
+        time.sleep(5)
+    else:
+        print(f"could not copy the evidence out of {ns}/controller: {copied.stderr.strip()}", file=sys.stderr)
+        return 1
     (out / "manifests.yaml").write_text(manifests, encoding="utf-8")
     print(f"run {args.run_id}: {status}; evidence in {out}")
     if not args.keep:
