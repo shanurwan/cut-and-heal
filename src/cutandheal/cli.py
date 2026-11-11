@@ -151,6 +151,13 @@ def cmd_report(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_site(args: argparse.Namespace) -> int:
+    from .site import write_site_data
+
+    print(write_site_data([Path(r) for r in args.runs], Path(args.out), args.evidence_url))
+    return 0
+
+
 def cmd_trace(args: argparse.Namespace) -> int:
     from .trace import fetch_ioda, segment
 
@@ -197,6 +204,12 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("runs", nargs="+")
     p.add_argument("--out", required=True)
     p.set_defaults(fn=cmd_report)
+
+    p = sub.add_parser("site", help="export replicate runs as the data file the explorer page replays")
+    p.add_argument("runs", nargs="+")
+    p.add_argument("--out", required=True, help="e.g. site/data/iran-2019-11.json")
+    p.add_argument("--evidence-url", default="", help="where the raw evidence of these runs can be found")
+    p.set_defaults(fn=cmd_site)
 
     p = sub.add_parser("trace", help="segment a public outage signal into availability levels")
     p.add_argument("--country", required=True, help="ISO 3166-1 alpha-2, e.g. IR")

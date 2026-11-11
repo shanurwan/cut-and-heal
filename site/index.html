@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>cut-and-heal explorer</title>
+<meta name="description" content="Replay of measured runs: real internet outages against a gossipsub network on Kubernetes.">
+<link rel="stylesheet" href="style.css">
+<script type="importmap">
+{"imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+}}
+</script>
+</head>
+<body>
+<canvas id="scene" aria-label="3D view of the replayed network"></canvas>
+<div id="labels" aria-hidden="true"></div>
+
+<header id="top" class="panel">
+  <div class="brand">
+    <a href="https://github.com/shanurwan/cut-and-heal">cut-and-heal</a>
+    <span class="muted">explorer</span>
+  </div>
+  <label>Scenario <select id="scenario"></select></label>
+  <label>Run <select id="run"></select></label>
+  <a id="evidence" class="link" target="_blank" rel="noopener">raw evidence</a>
+</header>
+
+<aside id="now" class="panel">
+  <div class="phase-name" id="phase-name">loading</div>
+  <div class="muted small" id="phase-note"></div>
+  <div class="row big"><span id="border-count">-</span><span class="muted"> inside nodes with the border open</span></div>
+
+  <h2>Delivered, last 10 s <span class="tag">measured</span></h2>
+  <div id="delivery"></div>
+
+  <h2>Median latency, this phase <span class="tag">measured</span></h2>
+  <div id="latency" class="grid2"></div>
+
+  <h2>Mesh size <span class="tag">measured</span></h2>
+  <div id="mesh" class="grid2"></div>
+
+  <div id="event" class="event"></div>
+</aside>
+
+<aside id="side" class="panel">
+  <div class="tabs" role="tablist">
+    <button role="tab" data-tab="how" class="on">Mechanism</button>
+    <button role="tab" data-tab="found">Findings</button>
+    <button role="tab" data-tab="pod">Pod</button>
+    <button role="tab" data-tab="view">View</button>
+  </div>
+  <section id="tab-how"></section>
+  <section id="tab-found" hidden></section>
+  <section id="tab-pod" hidden><p class="muted">Click a building to inspect that pod.</p></section>
+  <section id="tab-view" hidden>
+    <label class="check"><input type="checkbox" id="v-links" checked> Peer links <span class="muted">(illustrative)</span></label>
+    <label class="check"><input type="checkbox" id="v-inside" checked> Messages published inside</label>
+    <label class="check"><input type="checkbox" id="v-outside" checked> Messages published outside</label>
+    <label class="check"><input type="checkbox" id="v-height" checked> Building height = bytes sent per second</label>
+    <label class="check"><input type="checkbox" id="v-spin"> Slow orbit</label>
+    <h2>Legend</h2>
+    <ul class="legend">
+      <li><i class="sw ir"></i> inside pod</li>
+      <li><i class="sw world"></i> outside pod</li>
+      <li><i class="sw open"></i> border open on this pod</li>
+      <li><i class="sw shut"></i> border shut (this pod's wall slab is up)</li>
+      <li><i class="ln live"></i> link in use</li>
+      <li><i class="ln stale"></i> peer still counted, unreachable</li>
+      <li><i class="ln dial"></i> border open, nothing crossing yet</li>
+    </ul>
+  </section>
+</aside>
+
+<footer id="bottom" class="panel">
+  <div class="controls">
+    <button id="play" aria-label="Play or pause">Pause</button>
+    <div class="speeds" id="speeds"></div>
+    <div class="clock"><span id="clock">00:00</span><span class="muted"> / <span id="total">00:00</span></span></div>
+    <div class="muted small" id="caveat">Every flash, height and wall movement replays a measured value. Peer links are illustrative: runs record each pod's mesh size, not its peers.</div>
+  </div>
+  <div id="timeline">
+    <div id="phases"></div>
+    <canvas id="spark" height="46"></canvas>
+    <div id="playhead"></div>
+  </div>
+  <div class="sparkkey small muted">
+    <span><i class="ln k-io"></i> inside to outside</span>
+    <span><i class="ln k-oi"></i> outside to inside</span>
+    <span><i class="ln k-ii"></i> inside to inside</span>
+    <span>share of nodes reached by each message</span>
+  </div>
+</footer>
+
+<div id="error" hidden></div>
+<script type="module" src="app.js"></script>
+</body>
+</html>
