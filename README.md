@@ -49,6 +49,9 @@ Iran, November 2019, replayed against 150 nodes (50 inside, 100 outside). Four v
 - **Crossing outward stayed about four times slower** until the border was fully open, even
   with 30 of 50 nodes reconnected.
 
+**[Explore the replay in 3D](https://shanurwan.github.io/cut-and-heal/)**: every pod, every message and
+every shaper of those runs, on a timeline you can scrub.
+
 Seven predictions were written down before the first run; five held and two were refuted.
 The findings, the predictions, what they do not establish, and every withdrawn run are in
 [reports/iran-2019-11](reports/iran-2019-11/README.md).
@@ -116,6 +119,11 @@ test that produces the fault and checks the rule fires.
 **Evidence first, verdicts offline.** The controller collects raw logs and judges nothing.
 `cah analyze` recomputes every number from those files.
 
+**The explorer replays, it does not simulate.** [The page](https://shanurwan.github.io/cut-and-heal/) draws
+values exported from the runs: who published each message and how many pods received it, each pod's mesh
+size and send rate, and when each shaper acted. Peer links are the one illustrative part, because runs
+record a pod's mesh size and not its peers.
+
 **Published results come from public runs.** The *replay* workflow runs each seed on a fresh
 cluster on a GitHub-hosted runner. A report names the workflow run that produced it, and
 that run's artifacts hold the raw logs.
@@ -135,6 +143,7 @@ cah validate scenarios/iran-2019-11.yaml     # print the timeline
 cah run scenarios/iran-2019-11.yaml --run-id iran-1 --seed 1 --controller-image cut-and-heal:dev
 cah analyze runs/iran-1                      # validity verdicts, then results
 cah report runs/iran-1 runs/iran-2 runs/iran-3 --out reports/iran-2019-11
+cah site runs/iran-1 runs/iran-2 runs/iran-3 --out site/data/iran-2019-11.json   # data for the explorer page
 ```
 
 On an existing cluster, label nodes instead of creating one:
