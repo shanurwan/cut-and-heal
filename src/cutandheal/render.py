@@ -54,6 +54,14 @@ def _region_selector(region: str) -> dict:
     return {REGION_LABEL: region}
 
 
+def _pod_security(scn: Scenario) -> dict:
+    """Pod-level settings shared by every libp2p pod. The kubelet refuses a pod whose
+    sysctl it does not allow, so a pod that is Running has the value it asked for."""
+    if not scn.sysctls:
+        return {}
+    return {"securityContext": {"sysctls": [{"name": k, "value": v} for k, v in sorted(scn.sysctls.items())]}}
+
+
 def _node_statefulset(scn: Scenario, region: str, opt: RenderOptions) -> dict:
     labels = {ROLE_LABEL: "node", REGION_LABEL: region}
     return {
@@ -69,6 +77,7 @@ def _node_statefulset(scn: Scenario, region: str, opt: RenderOptions) -> dict:
             "template": {
                 "metadata": {"labels": labels},
                 "spec": {
+                    **_pod_security(scn),
                     "nodeSelector": _region_selector(region),
                     "terminationGracePeriodSeconds": 5,
                     "automountServiceAccountToken": False,
@@ -132,6 +141,7 @@ def _bootstrap(scn: Scenario, opt: RenderOptions) -> list[dict]:
                 "template": {
                     "metadata": {"labels": labels},
                     "spec": {
+                        **_pod_security(scn),
                         "nodeSelector": _region_selector(scn.bootstrap_region),
                         "terminationGracePeriodSeconds": 5,
                         "automountServiceAccountToken": False,

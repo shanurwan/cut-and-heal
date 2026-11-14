@@ -114,3 +114,17 @@ def test_the_dashboard_queries_only_metrics_the_run_exports(scn) -> None:
         metric = expr.split("(")[-1].split("{")[0].split(")")[0].split("[")[0]
         assert metric in known, metric
     assert len({p["id"] for p in dashboard()["panels"]}) == len(DASHBOARD_PANELS)
+
+
+def test_sysctls_reach_every_libp2p_pod_and_nothing_else(scn) -> None:
+    opt = RenderOptions(namespace="cah", run_id="r1", seed=7, controller_image="cah:test")
+    plain = [d for d in render(scn, opt, "") if d["kind"] == "StatefulSet"]
+    assert all("securityContext" not in d["spec"]["template"]["spec"] for d in plain)
+
+    tuned = scn.model_copy(update={"sysctls": {"net.ipv4.tcp_retries2": "5"}})
+    docs = render(tuned, opt, "")
+    want = {"sysctls": [{"name": "net.ipv4.tcp_retries2", "value": "5"}]}
+    sets = [d for d in docs if d["kind"] == "StatefulSet"]
+    assert len(sets) == 3 and all(d["spec"]["template"]["spec"]["securityContext"] == want for d in sets)
+    others = [d for d in docs if d["kind"] in ("Pod", "Deployment")]
+    assert all("sysctls" not in str(d) for d in others)

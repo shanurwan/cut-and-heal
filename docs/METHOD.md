@@ -131,3 +131,34 @@ how the result depends on that one number.
 | 2026-11-11 | none (V2 limit unchanged) | Three 150-node runs of `iran-2019-11` on a 4-CPU machine were withdrawn under V2: shapers applied phases up to 1,950 ms late against a 500 ms limit, while every other rule passed. | Each shaper forked `date`, one `tc` per command and `curl` on waking, and 150 of them woke at once. The shaper now forks once per phase or not at all. The limit stays where it was set. |
 | 2026-11-11 | Steady window | The last half of each phase. Was: everything after the first 20 s. | In the withdrawn 150-node runs, cross-border delivery took about 100 s to resume after two nodes reopened. A 20 s guard put most of that transition inside the "steady" figure, which then described neither the transition nor the level reached. Settle time is measured against the amended level. Predictions P1 to P7 are judged as written. |
 | 2026-11-11 | V7 | The start line is `Host info`. | The pinned image does not log `Node started`. |
+
+
+## 10. Follow-up question: what sets the nine minutes?
+
+Written on 2026-11-14, before either scenario below was run.
+
+In the Iran runs the nodes inside kept their pre-cut mesh size for 535 to 574 s after the
+border shut. The report listed a connection timeout as a lead and did not test it. This
+section tests one candidate.
+
+**Hypothesis.** A node stops counting an unreachable peer when the kernel gives up on the
+TCP connection to it, and not before. Nothing above TCP notices sooner.
+
+**Design.** Two scenarios that differ in one setting. `long-cut` holds a full shutdown for
+900 s with kernel defaults. `long-cut-short-timeout` is the same with
+`net.ipv4.tcp_retries2` set to 5 on every node, where the default is 15. The setting is per
+network namespace and is applied through the pod's security context; a pod whose setting the
+kubelet refused does not start, so V1 covers it. Three seeds each. Validity rules and limits
+are unchanged.
+
+| # | Prediction | Refuted if |
+|---|---|---|
+| P8 | With default timers, the inside region's mean mesh size first moves by more than 10% between 480 and 660 s after the cut, as in the Iran runs. | It moves outside that window, or never, in any valid run. |
+| P9 | With 5 retransmissions, it first moves within 120 s of the cut. | It takes longer than 120 s in any valid run. |
+
+If P9 holds, the kernel's retransmission timeout is what a cut-off node waits for. If P9
+fails while P8 holds, the timer is above TCP and this experiment has ruled the kernel out.
+If P8 fails, the nine minutes did not reproduce and neither conclusion is drawn.
+
+**What it cannot show.** Which nim-libp2p code path reacts to the closed connection, and
+whether a NetworkPolicy cut behaves the same as a netem drop.

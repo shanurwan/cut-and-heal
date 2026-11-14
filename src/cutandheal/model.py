@@ -7,6 +7,7 @@ changes over time. `plan.py` turns it into per-pod `tc` commands once pod addres
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Annotated
 
@@ -18,6 +19,10 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 MIN_PHASE_S = 30
 
 Name = Annotated[str, Field(pattern=r"^[a-z][a-z0-9-]{0,30}$")]
+
+# The only kernel settings a scenario may change, and only inside a node's own network
+# namespace. `cluster/up.sh` allows the same pattern and nothing wider.
+SYSCTL = re.compile(r"^net\.ipv4\.tcp_[a-z0-9_]+$")
 
 
 class _Model(BaseModel):
@@ -138,6 +143,10 @@ class Scenario(_Model):
     borders: dict[Name, Border]
     bootstrap_region: Name
     publish: Publish = Publish()
+    sysctls: dict[str, str] = Field(default_factory=dict)
+    """Kernel TCP settings for every gossipsub node, for experiments that ask which timer
+    governs a behaviour. Empty means the kernel defaults, which is what every report
+    before `long-cut` used."""
     timeline: tuple[Phase, ...] = Field(min_length=2)
 
     @model_validator(mode="after")
@@ -148,6 +157,12 @@ class Scenario(_Model):
                     raise ValueError(f"border {bid!r} names unknown region {region!r}")
         if self.bootstrap_region not in self.regions:
             raise ValueError(f"bootstrap_region {self.bootstrap_region!r} is not a region")
+        for key in self.sysctls:
+            if not SYSCTL.match(key):
+                raise ValueError(
+                    f"sysctl {key!r} is not allowed: only net.ipv4.tcp_* can be set, and only "
+                    "inside a node's own network namespace"
+                )
         names = [p.name for p in self.timeline]
         if len(set(names)) != len(names):
             raise ValueError("phase names must be unique; analysis keys results by phase name")

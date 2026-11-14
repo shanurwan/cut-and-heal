@@ -95,3 +95,12 @@ def test_typos_in_a_scenario_fail_loudly() -> None:
     data["regions"]["inside"]["node"] = 4
     with pytest.raises(ValidationError, match="Extra inputs"):
         Scenario.model_validate(data)
+
+
+def test_only_tcp_sysctls_can_be_set() -> None:
+    data = _with()
+    data["sysctls"] = {"net.ipv4.tcp_retries2": "5"}
+    assert Scenario.model_validate(data).sysctls == {"net.ipv4.tcp_retries2": "5"}
+    data["sysctls"] = {"kernel.shm_rmid_forced": "1"}
+    with pytest.raises(ValidationError, match="not allowed"):
+        Scenario.model_validate(data)

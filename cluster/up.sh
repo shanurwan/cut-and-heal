@@ -17,7 +17,8 @@ REGIONS=("$@")
 [ "${#REGIONS[@]}" -ge 2 ] || { echo "usage: $0 <region> <region> [...]" >&2; exit 2; }
 
 # A /23 per node holds 510 pods; the default /24 caps a region at 254 whatever max-pods says.
-COMMON=(--kubelet-arg="max-pods=${MAX_PODS}")
+# TCP timers are per network namespace, so a pod may set its own. Nothing wider is allowed.
+COMMON=(--kubelet-arg="max-pods=${MAX_PODS}" --kubelet-arg="allowed-unsafe-sysctls=net.ipv4.tcp_*")
 if docker info --format '{{.SecurityOptions}}' | grep -q rootless; then
   # Rootless Docker needs the cpu, cpuset and io cgroup controllers delegated to the user;
   # without them K3s exits with "failed to find cpu cgroup (v2)".
