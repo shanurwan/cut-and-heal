@@ -71,7 +71,8 @@ Written in [docs/METHOD.md](../../docs/METHOD.md#6-predictions) before the first
   was verified against the node's source or with a second experiment, so they are leads, not
   causes.
 - **Whether two nodes are special.** `scenarios/open-nodes-sweep.yaml` holds the border at
-  1, 2 and 5 open nodes after identical shutdowns. It has not been run for this report.
+  1, 2 and 5 open nodes after identical shutdowns. Its one valid run is reported in
+  [open-nodes-sweep](../open-nodes-sweep/README.md): a single open node carried everything.
 - **Anything at the scale of a public network.** These are 150 nodes on one 4-CPU machine.
 - **Anything about a real shutdown** beyond its shape. See the limits in the method.
 
