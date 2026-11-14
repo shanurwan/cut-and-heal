@@ -56,6 +56,11 @@ Seven predictions were written down before the first run; five held and two were
 The findings, the predictions, what they do not establish, and every withdrawn run are in
 [reports/iran-2019-11](reports/iran-2019-11/README.md).
 
+A follow-up experiment found what sets the nine minutes: the kernel's TCP retransmission
+limit. Lowering that one setting moved the mesh's reaction from about 560 s to about 20 s,
+in six valid runs with the predictions written first. See
+[reports/long-cut](reports/long-cut/README.md).
+
 A second scenario asks how few open nodes are enough. In its one valid run a single node in
 fifty carried all cross-border traffic; four runs were withdrawn because reopening the
 border loaded the host past the validity limits. See

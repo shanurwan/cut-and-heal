@@ -70,6 +70,9 @@ Written in [docs/METHOD.md](../../docs/METHOD.md#6-predictions) before the first
   interval, and delivery by gossip pull instead of mesh push, in that order. None of those
   was verified against the node's source or with a second experiment, so they are leads, not
   causes.
+- **Since tested:** the nine minutes. [long-cut](../long-cut/README.md) changes one kernel
+  setting and moves the mesh's reaction from about 560 s to about 20 s, so the wait is the
+  TCP retransmission limit. The 104 s and the slow outward direction remain untested.
 - **Whether two nodes are special.** `scenarios/open-nodes-sweep.yaml` holds the border at
   1, 2 and 5 open nodes after identical shutdowns. Its one valid run is reported in
   [open-nodes-sweep](../open-nodes-sweep/README.md): a single open node carried everything.
