@@ -50,6 +50,14 @@ now
 log "setup rc=$rc"
 ack setup setup 0 "$NOW_MS" "$rc"
 
+# The TCP timers this pod really has, read from its own network namespace, so a report can
+# state the value that governed a run instead of assuming the documented default.
+for key in tcp_retries2 tcp_keepalive_time; do
+  val=unreadable
+  { read -r val <"/proc/sys/net/ipv4/$key"; } 2>/dev/null || true
+  log "kernel $key=$val"
+done
+
 # 2. Wait for the timeline. The controller publishes it once every node is meshed.
 until plan="$(curl -fsS -m 5 "$C/v1/plan/$POD")" && [ -n "$plan" ]; do sleep 1; done
 

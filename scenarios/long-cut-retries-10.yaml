@@ -1,0 +1,32 @@
+# One arm of the question in docs/METHOD.md section 11. Identical to long-cut except that
+# every node gives up on an unanswered TCP connection after 10 retransmissions.
+name: long-cut-retries-10
+title: A fifteen-minute shutdown with TCP giving up after 10 retransmissions
+
+regions:
+  ir:
+    nodes: 50
+    domestic: {delay_ms: 20, jitter_ms: 4, rate_mbit: 50}
+  world:
+    nodes: 100
+    domestic: {delay_ms: 50, jitter_ms: 10, rate_mbit: 50}
+
+borders:
+  ir-world:
+    between: [ir, world]
+    gated: ir
+    healthy: {delay_ms: 100, jitter_ms: 20, loss_pct: 0.5, rate_mbit: 20}
+
+bootstrap_region: world
+
+publish:
+  rate_hz: 1
+  size_bytes: 1000
+
+sysctls:
+  net.ipv4.tcp_retries2: "10"
+
+timeline:
+  - {name: baseline, duration_s: 240}
+  - {name: shut, duration_s: 900, borders: {ir-world: {open_nodes: 0}}}
+  - {name: restored, duration_s: 300}

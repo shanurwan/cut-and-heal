@@ -187,6 +187,16 @@ def mesh_reaction(run: Run, change: float = 0.1) -> list[dict]:
     return out
 
 
+def kernel_settings(run: Run) -> dict[str, dict[str, int]]:
+    """Each TCP setting the shapers recorded, with the number of pods that had each value."""
+    out: dict[str, dict[str, int]] = {}
+    for settings in run.kernel.values():
+        for key, value in settings.items():
+            counts = out.setdefault(key, {})
+            counts[value] = counts.get(value, 0) + 1
+    return out
+
+
 def bridge_load(run: Run) -> list[dict]:
     """Bytes sent per node in steady state: nodes with the border open against the rest of
     their region, for every phase where only some nodes are open."""
@@ -378,6 +388,24 @@ def write_report(run_dirs: list[Path], out: Path) -> Path:
                 "never" if row["reacted_after_s"] is None else str(row["reacted_after_s"]) for row in rows
             )
             md.append(f"| {phase} | {region} | {at_start:.1f} | {at_end:.1f} | {reacted} |")
+    kernels = [kernel_settings(r) for r, *_ in valid]
+    if any(kernels):
+        md += [
+            "",
+            "## Kernel TCP settings on the nodes",
+            "",
+            "Read by each pod's shaper from the pod's own network namespace when it started. Pods per "
+            "value, one column per valid run.",
+            "",
+            "| Setting | " + " | ".join(str(r.record.get("run_id")) for r, *_ in valid) + " |",
+            "|---|" + "---|" * len(valid),
+        ]
+        for key in sorted({k for per_run in kernels for k in per_run}):
+            row = [
+                ", ".join(f"{value} ({n} pods)" for value, n in sorted(per_run.get(key, {}).items())) or "not recorded"
+                for per_run in kernels
+            ]
+            md.append(f"| {key} | " + " | ".join(row) + " |")
     loads = [row for r, *_ in valid for row in bridge_load(r)]
     if loads:
         md += [
@@ -412,7 +440,7 @@ def write_report(run_dirs: list[Path], out: Path) -> Path:
                 {
                     "run_id": r.record.get("run_id"), "seed": r.seed, "valid": ok,
                     "verdicts": [asdict(v) for v in vs], "cells": [asdict(c) for c in cs],
-                    "transitions": [asdict(t) for t in trs],
+                    "transitions": [asdict(t) for t in trs], "kernel": kernel_settings(r),
                 }
                 for r, cs, trs, vs, ok in analysed
             ],

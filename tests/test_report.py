@@ -26,3 +26,15 @@ def test_a_report_with_no_valid_run_has_no_results(tmp_path, scn, topo) -> None:
     text = write_report([write_run(tmp_path / "a", scn, topo, cpu_busy=0.99)], tmp_path / "out").read_text()
     assert "this report has no results" in text
     assert "## Delivery" not in text
+
+
+def test_report_states_the_tcp_settings_the_pods_recorded(tmp_path, scn, topo) -> None:
+    before = write_report([write_run(tmp_path / "a", scn, topo)], tmp_path / "o1").read_text(encoding="utf-8")
+    assert "Kernel TCP settings" not in before
+
+    run = write_run(tmp_path / "b", scn, topo, tcp_retries2="15")
+    text = write_report([run], tmp_path / "o2").read_text(encoding="utf-8")
+    pods = len(topo.pods)
+    assert f"| tcp_retries2 | 15 ({pods} pods) |" in text
+    results = json.loads((tmp_path / "o2" / "results.json").read_text())
+    assert results[0]["kernel"] == {"tcp_retries2": {"15": pods}}

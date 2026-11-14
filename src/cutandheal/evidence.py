@@ -18,6 +18,8 @@ from .plan import Pod, Topology
 
 _SENT = re.compile(r"Sent message\s.*?msgId=(\d+) timestamp=(\d+)")
 _RECV = re.compile(r"Received message\s.*?msgId=(\d+) sentAt=(\d+) current=(\d+)")
+# Written by the shaper once its qdisc tree is up: `shaper kernel tcp_retries2=15`.
+_KERNEL = re.compile(r"shaper kernel (\w+)=(\S+)")
 # The first line the node writes. Its absence means the log was rotated or truncated.
 START_MARKER = "Host info"
 
@@ -58,6 +60,9 @@ class Run:
     logs_missing: list[str]
     logs_without_start: list[str]
     orphan_receives: int
+    kernel: dict[str, dict[str, str]] = field(default_factory=dict)
+    """Per pod, the kernel TCP settings its shaper read at start. Empty for evidence
+    collected before shapers recorded them."""
 
     @property
     def seed(self) -> int:
@@ -90,6 +95,11 @@ def parse_node_log(text: str) -> tuple[list[tuple[int, int]], list[tuple[int, in
     return sent, recv, START_MARKER in text
 
 
+def parse_shaper_log(text: str) -> dict[str, str]:
+    """The kernel settings a shaper recorded."""
+    return dict(_KERNEL.findall(text))
+
+
 def load_run(path: str | Path) -> Run:
     path = Path(path)
     record = json.loads((path / "run.json").read_text(encoding="utf-8"))
@@ -105,6 +115,7 @@ def load_run(path: str | Path) -> Run:
     receives: list[tuple[str, int, int, int]] = []
     sent_per_pod: dict[str, int] = {}
     missing, no_start = [], []
+    kernel: dict[str, dict[str, str]] = {}
     for pod in topo.pods:
         log_path = path / "logs" / f"{pod.name}.node.log.gz"
         if not log_path.exists():
@@ -117,8 +128,13 @@ def load_run(path: str | Path) -> Run:
         for msg_id, ts in sent:
             messages[msg_id] = Message(msg_id, pod.name, pod.region, ts)
         receives += [(pod.name, m, s, r) for m, s, r in recv]
-        if not (path / "logs" / f"{pod.name}.shaper.log.gz").exists():
+        shaper_path = path / "logs" / f"{pod.name}.shaper.log.gz"
+        if not shaper_path.exists():
             missing.append(f"{pod.name}/shaper")
+            continue
+        settings = parse_shaper_log(gzip.decompress(shaper_path.read_bytes()).decode("utf-8", "replace"))
+        if settings:
+            kernel[pod.name] = settings
 
     orphans = 0
     for pod_name, msg_id, sent_ns, recv_ns in receives:
@@ -147,6 +163,7 @@ def load_run(path: str | Path) -> Run:
         logs_missing=missing,
         logs_without_start=no_start,
         orphan_receives=orphans,
+        kernel=kernel,
     )
 
 

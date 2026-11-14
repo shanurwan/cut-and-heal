@@ -37,8 +37,12 @@ def write_run(
     cpu_busy: float = 0.3,
     restarts: dict[str, int] | None = None,
     drop_sent_line: str | None = None,
+    tcp_retries2: str | None = None,
 ) -> Path:
     (path / "logs").mkdir(parents=True)
+    shaper_log = b"shaper setup rc=0\n"
+    if tcp_retries2 is not None:
+        shaper_log += f"2026-01-01T00:00:00Z shaper kernel tcp_retries2={tcp_retries2}\n".encode()
     phases = [{"name": n, "start_ms": T0_MS + s * 1000, "end_ms": T0_MS + e * 1000} for n, s, e in scn.phase_windows()]
     pods = list(topo.pods)
     by_region = {r: topo.by_region(r) for r in scn.regions}
@@ -84,7 +88,7 @@ def write_run(
             )
     for pod in pods:
         (path / "logs" / f"{pod.name}.node.log.gz").write_bytes(gzip.compress("\n".join(logs[pod.name]).encode()))
-        (path / "logs" / f"{pod.name}.shaper.log.gz").write_bytes(gzip.compress(b"shaper setup rc=0\n"))
+        (path / "logs" / f"{pod.name}.shaper.log.gz").write_bytes(gzip.compress(shaper_log))
 
     acks = [
         {

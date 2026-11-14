@@ -162,3 +162,60 @@ If P8 fails, the nine minutes did not reproduce and neither conclusion is drawn.
 
 **What it cannot show.** Which nim-libp2p code path reacts to the closed connection, and
 whether a NetworkPolicy cut behaves the same as a netem drop.
+
+## 11. Follow-up question: is the kernel the only timer?
+
+Written on 2026-11-15, before any scenario below was run.
+
+Section 10 concluded that the kernel's retransmission limit sets how long a cut-off node
+keeps a dead peer. That conclusion has a gap, noted in the report: the default arm reacted
+at 537 to 577 s, and the documented default of 15 retransmissions cannot produce that. The
+kernel closes a connection once the time since the first retransmission reaches the sum of
+the backoff schedule: the timeout doubles from 200 ms, is capped at 120 s, and is counted
+for `tcp_retries2` retransmissions plus the wait after the last one.
+
+| `tcp_retries2` | Kernel closes after |
+|---|---|
+| 5 | 12.6 s |
+| 8 | 102.2 s |
+| 10 | 324.6 s |
+| 13 | 684.6 s |
+| 15 | 924.6 s |
+
+A single test connection on another Linux host, cut with netem, closed after 13 s at 5,
+107 s at 8 and 951 s at 15. So either the pods on the runners do not have 15, or something
+other than the kernel closes the connection at about nine minutes. Section 10 could not tell
+these apart because no run recorded the value inside a pod.
+
+**Change to the tool.** Each pod's shaper now logs `tcp_retries2` and `tcp_keepalive_time`
+as read from the pod's own network namespace, and the report prints them.
+
+**Design.** `long-cut` once more, to record the default. Three new arms identical to it
+except for `tcp_retries2`: `long-cut-retries-8`, `long-cut-retries-10`, `long-cut-retries-13`.
+Three seeds per new arm, one for the default. Validity rules and limits are unchanged. In
+section 10 the mesh moved 6 to 10 s after the kernel's own time at 5 retransmissions, so
+each window below is the kernel's time plus up to 35 s.
+
+| # | Prediction | Refuted if |
+|---|---|---|
+| P10 | Every pod of `long-cut` records `tcp_retries2 = 15`, and every pod of each arm records the value its scenario set. | Any pod records another value. |
+| P11 | With 8 retransmissions, the inside mesh first moves 100 to 140 s after the cut. | It moves outside that window in any valid run. |
+| P12 | With 10, it first moves 320 to 360 s after the cut. | It moves outside that window in any valid run. |
+| P13 | With 13, it first moves 530 to 590 s after the cut: the same as with defaults, and about 100 s before the kernel would close the connection. | It moves outside that window in any valid run. |
+
+**Reading the outcomes.**
+
+- P10 to P13 all hold: two timers. The kernel governs below about nine minutes, and
+  something else ends the connection at about nine minutes whatever the kernel's limit. The
+  headline of the long-cut report is then too strong and is corrected.
+- P10 fails because the default pods record 12: the kernel alone explains every run, and
+  P13 should fail with a reaction near 685 to 720 s.
+- P10 holds and P13 fails with a reaction near 685 to 720 s: the kernel governs at 13 but
+  not at 15, which this design cannot explain. It is reported as open.
+- P11 or P12 fails: the backoff rule above does not describe these nodes, and section 10's
+  conclusion is withdrawn until it is understood.
+
+**What it cannot show.** What the second timer is, if there is one. Candidates are a
+keepalive or ping in the node's multiplexer and the gossipsub peer score; finding it means
+reading nim-libp2p, which is not part of this experiment.
+
