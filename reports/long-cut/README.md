@@ -2,10 +2,11 @@
 
 In the [Iran runs](../iran-2019-11/README.md), nodes cut off from the rest of the network
 kept their pre-cut mesh size for about nine minutes. That report listed a connection timeout
-as a lead and did not test it. This one does, in three experiments.
+as a lead and did not test it. This one does, in four experiments.
 
 Every scenario here is the same network: 50 gossipsub nodes inside and 100 outside, one full
-shutdown held for 15 minutes. The node is nim-libp2p 2.4.0 with yamux over TCP.
+shutdown held for 15 minutes (18 in the last experiment). The node is nim-libp2p 2.4.0 with
+yamux over TCP.
 
 ## Result
 
@@ -14,16 +15,22 @@ comes first:
 
 1. **The kernel closes the TCP connection.** This is set by `net.ipv4.tcp_retries2`: 12.6 s
    at 5 retransmissions, 925 s at the default of 15.
-2. **The multiplexer's idle check resets the stream.** Each yamux stream is checked every
-   5 minutes, counted from when it was opened, and reset if nothing was read or written
-   since the last check. A stream to a dead peer is therefore reset 5 to 10 minutes after
-   the node last wrote to it, at a moment that depends on the stream's age and not on the
-   cut.
+2. **An idle check in nim-libp2p ends it.** The library runs the same periodic check at two
+   layers: on each yamux stream, and on the encrypted connection beneath. Both run every
+   5 minutes by default, counted from when the stream or connection was opened, and end it
+   if nothing was read or written since the last check. A dead peer is therefore dropped
+   5 to 10 minutes after the node last wrote to it, at a moment that depends on the
+   connection's age and not on the cut.
 
 With default settings the second comes first. The nine minutes of the earlier runs was a
 5-minute limit plus the place where those scenarios happened to put the cut in the cycle of
 the check. Moving the cut 150 s later, and changing nothing else, moved the reaction from
 about 560 s to 678 s.
+
+In the published node it is the stream's check that acts. Raising the stream's timeout alone
+to 600 s did not delay the reaction: the connection's check then closed the same connections
+at the same node age. I had predicted it would be delayed, and concluded one experiment
+earlier that the stream's check was the second timer. That was too narrow.
 
 Seconds after the cut until the inside region's mean mesh size first moved by more than 10%,
 one value per valid run:
@@ -39,6 +46,15 @@ one value per valid run:
 
 At 5, 8 and 10 the mesh follows the kernel, 6 to 27 s behind it. At 13 and 15 the idle check
 comes first.
+
+The same cut at 240 s on a node built from source, with the yamux stream timeout as the only
+difference between arms:
+
+| Yamux stream timeout | Inside mesh first moved after |
+|---|---|
+| 120 s | 371, 378, and one run that never passed 10% |
+| 300 s (the library's default) | 575, 533, 553 |
+| 600 s | 536, 577 |
 
 The kernel's column is its backoff rule: the retransmission timeout doubles from 200 ms, is
 capped at 120 s, and the connection is closed once the time since the first retransmission
@@ -115,7 +131,51 @@ so in bursts whose peaks are 270 to 300 s apart. The mesh fell inside a burst ev
 Counted from the nodes' start, the bursts sit at the same ages in every run. The cut landed
 150 s later in that cycle, and the mesh fell one burst later.
 
-All predictions of the three experiments were pushed before the runs they describe.
+**Fourth experiment** ([METHOD.md section 13](../../docs/METHOD.md#13-follow-up-question-does-the-reaction-move-when-the-idle-timeout-is-changed)):
+the third experiment did not change the timeout it blamed. This one does. The regression
+node is built from its own source with one change, a setting for the yamux stream timeout,
+and run at 120, 300 and 600 s, three seeds each.
+
+| # | Prediction | Result |
+|---|---|---|
+| P17 | With 300 s, the node built here behaves as the published one: mesh first moves 480 to 600 s after the cut, at a node age of 900 to 975 s | Held: 575, 533 and 553 s; 944, 949 and 935 s |
+| P18 | With 120 s, the inside mesh first moves 190 to 480 s after the cut | Failed in one run of three: 371 and 378 s, and one run in which the mesh fell 8.5% and never passed 10% |
+| P19 | With 600 s, it first moves more than 700 s after the cut | **Refuted:** 536 and 577 s |
+| P20 | Peaks of consecutive bursts of yamux timeouts are 270 to 330 s apart with 300 s and 570 to 630 s with 600 s | Failed at 300 s: 290 and 255, 165 and 275, 330 and 260 s. Not testable at 600 s: one burst in the shutdown |
+
+The rule written beforehand for this outcome, P17 holding and P19 failing, was that the
+third experiment's conclusion is withdrawn. As it was worded, "the second timer is the
+multiplexer's idle check", it is. What the runs support is narrower in one way and wider in
+another.
+
+The nodes count their idle timeouts by layer. From 30 s before the inside mesh first moved
+to 60 s after:
+
+| Arm | Mesh first moved (s) | Yamux stream timeouts | Secure connection timeouts |
+|---|---|---|---|
+| published node, cut at 240 s | 567 | 4215 | 19 |
+| published node, cut at 390 s | 677, 679, 678 | 3812, 3444, 3696 | 0, 0, 0 |
+| built node, 300 s | 575, 533, 553 | 3750, 3370, 4143 | 21, 41, 22 |
+| built node, 600 s | 536, 577 | 0, 0 | 241, 152 |
+| built node, 120 s | 371, 378 | 1569, 374 | 0, 1 |
+| built node, 120 s, the run that never passed 10% | fell past 5% at 291 | 66 | 387 |
+
+With the stream timeout at 600 s the mesh fell at the same node age as before, 946 and
+948 s, and at that moment the nodes counted no stream timeout at all and 152 to 241 timeouts
+of the secure connection. Its timeout is 5 minutes too (`DefaultConnectionTimeout`) and it
+uses the same `timeoutMonitor`. So the 5-minute idle check stands, and the cycle of the
+third experiment stands, but the check exists at two layers and removing one leaves the
+other.
+
+With the stream timeout at 120 s the reaction came earlier in two runs, with stream timeouts
+and none of the connection's. So the stream's check is enough to cause the reaction. It is
+not necessary for it.
+
+P20 failed because a burst lasts 100 to 160 s and its peak can sit anywhere inside it. The
+bursts themselves begin 275 to 300 s apart in all three runs at 300 s.
+
+All predictions of the four experiments were pushed before the runs they describe: thirteen
+predictions, of which ten held.
 
 ## What else the runs showed
 
@@ -145,9 +205,14 @@ three runs per arm and not a tested claim.
 
 ## What this does not establish
 
-- **The mechanism by intervention.** The idle timeout is compiled into the node and was not
-  varied. The evidence is the source, the timing of the runs and the nodes' own counter.
-  A node built with another timeout would settle it.
+- **That a longer timeout delays the reaction.** Only the stream's timeout was raised, and
+  the connection's took over. The connection's timeout is not a parameter of the library's
+  builder, so raising both needs a change to nim-libp2p itself. Until that is run, the
+  evidence that the idle check is what a default node waits for is the source, the timing,
+  the counter, and one direction of intervention: a shorter stream timeout brought the
+  reaction forward.
+- **Why the layers traded places in one run at 120 s.** There the connection's check fired
+  first, 291 s after the cut, and the mesh fell by less.
 - **Why the node age at the fall drifts.** It ranges from 919 to 958 s in the runs with the
   usual cut. Streams open some time after a node starts and that time is not recorded.
 - **That a NetworkPolicy cut behaves the same.** A policy that rejects packets, or a CNI
@@ -171,6 +236,9 @@ comparable only if the cut comes at the same node age, or if the reaction is tak
 the idle check's hands by lowering `tcp_retries2`: at 8 or less the reaction comes within
 two minutes and follows the kernel's rule to within half a minute.
 
+Changing the muxer's timeout is not a way to control it. Raising yamux's alone changed
+nothing, because the layer beneath has the same check.
+
 ## Provenance
 
 | Arm | Report | Evidence | Valid runs |
@@ -183,20 +251,30 @@ two minutes and follows the kernel's rule to within half a minute.
 | 8 | [retries-8](retries-8/report.md) | [43629704466](https://github.com/shanurwan/cut-and-heal/actions/runs/43629704466) | 2 of 3 |
 | 10 | [retries-10](retries-10/report.md) | [43629709589](https://github.com/shanurwan/cut-and-heal/actions/runs/43629709589) | 3 of 3 |
 | 13 | [retries-13](retries-13/report.md) | [43629714553](https://github.com/shanurwan/cut-and-heal/actions/runs/43629714553) | 3 of 3 |
+| built node, yamux 120 s | [idle-120](idle-120/report.md) | [43717599103](https://github.com/shanurwan/cut-and-heal/actions/runs/43717599103) | 3 of 3 |
+| built node, yamux 300 s | [idle-300](idle-300/report.md) | [43717610307](https://github.com/shanurwan/cut-and-heal/actions/runs/43717610307) | 3 of 3 |
+| built node, yamux 600 s | [idle-600](idle-600/report.md) | [43717620990](https://github.com/shanurwan/cut-and-heal/actions/runs/43717620990) | 2 of 3 |
 
 One job, one fresh K3s cluster and one seed per run, on GitHub-hosted `ubuntu-24.04` runners
 (4 CPUs). The kernel setting is applied through each pod's security context and, from the
 second experiment on, read back by each pod's shaper. Every number in the tables of mesh
 reaction and node age is in each arm's `results.json`, produced by `cah report` on that
-evidence. The bursts of idle timeouts are read from `metrics/stream_timeouts_by_region.json`
-in the evidence of the last two arms. To reproduce: Actions, *replay*, the scenario named in
-each arm's report.
+evidence. The bursts of idle timeouts in the third experiment and the counts by layer in the
+fourth are read from `metrics/stream_timeouts_by_region.json` in each run's evidence; the
+reports of the fourth experiment also list the bursts. To reproduce: Actions, *replay*, the
+scenario named in each arm's report.
+
+The built node is the regression node's source at `fb8691e` with
+[one patch](../../cluster/node/yamux-idle-timeout.patch), built in each job by
+`cluster/build-node.sh`. The bootstrap node is the published image in every arm.
 
 The source read is nim-libp2p at commit `73c3637`, pinned by the lock file of the
 [regression node](https://github.com/iftech/dst-libp2p-test-node): `timeoutMonitor` in
-`libp2p/stream/connection.nim`, the stream timeouts in `libp2p/muxers/yamux/yamux.nim`, and
-`onPubSubPeerEvent` in `libp2p/protocols/pubsub/gossipsub.nim`.
+`libp2p/stream/connection.nim`, the stream timeouts in `libp2p/muxers/yamux/yamux.nim`, the
+connection's in `libp2p/protocols/secure/secure.nim`, and `onPubSubPeerEvent` in
+`libp2p/protocols/pubsub/gossipsub.nim`.
 
-Every run that was started is listed here: twenty runs, nineteen valid. Seed 2 of the arm at
-8 is withdrawn under V2: one of its 450 shaper applications landed 540 ms late against a
-limit of 500 ms.
+Every run that was started is listed here: twenty-nine runs, twenty-seven valid. Two are
+withdrawn under V2, a shaper application later than the limit of 500 ms: seed 2 of the arm
+at 8 retransmissions (540 ms) and seed 1 of the arm at 600 s (579 ms). The withdrawn run at
+600 s first moved 544 s after the cut; it is not counted above.

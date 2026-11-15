@@ -56,15 +56,16 @@ Seven predictions were written down before the first run; five held and two were
 The findings, the predictions, what they do not establish, and every withdrawn run are in
 [reports/iran-2019-11](reports/iran-2019-11/README.md).
 
-Three follow-up experiments asked what sets the nine minutes, and found that nothing does.
+Four follow-up experiments asked what sets the nine minutes, and found that nothing does.
 A node drops a dead peer when the kernel closes the TCP connection (20 s, 118 s and 351 s at
-5, 8 and 10 retransmissions) or when the multiplexer's idle check resets the stream,
-whichever comes first. The idle check runs every 5 minutes from when a stream was opened, so
+5, 8 and 10 retransmissions) or when an idle check in nim-libp2p ends it, whichever comes
+first. The idle check runs every 5 minutes from when a stream or connection was opened, so
 with default settings the reaction comes 5 to 10 minutes after the node's last write,
 depending on how old the node was when the cut landed. Moving the cut 150 s later moved the
-reaction from about 560 s to 678 s. Nineteen valid runs, nine predictions written first, and
-one conclusion of mine corrected along the way. See
-[reports/long-cut](reports/long-cut/README.md).
+reaction from about 560 s to 678 s. The check exists at two layers: raising yamux's timeout
+alone changed nothing, which refuted a prediction of mine. Twenty-seven valid runs, thirteen
+predictions written first of which ten held, and two conclusions of mine corrected along the
+way. See [reports/long-cut](reports/long-cut/README.md).
 
 A second scenario asks how few open nodes are enough. In its one valid run a single node in
 fifty carried all cross-border traffic; four runs were withdrawn because reopening the

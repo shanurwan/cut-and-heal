@@ -71,8 +71,8 @@ Written in [docs/METHOD.md](../../docs/METHOD.md#6-predictions) before the first
   was verified against the node's source or with a second experiment, so they are leads, not
   causes.
 - **Since tested:** the nine minutes. [long-cut](../long-cut/README.md) finds two timers:
-  the kernel's TCP retransmission limit, and the multiplexer's idle check, which runs every
-  5 minutes from when a stream was opened. With default settings the idle check comes
+  the kernel's TCP retransmission limit, and an idle check in nim-libp2p, which runs every
+  5 minutes from when a stream or connection was opened. With default settings the idle check comes
   first, 5 to 10 minutes after a node's last write, so nine minutes is where these runs
   happened to put the cut in that cycle and not a constant. The 104 s and the slow outward
   direction remain untested.
