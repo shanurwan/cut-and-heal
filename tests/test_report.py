@@ -90,3 +90,27 @@ def test_report_without_node_start_times_or_the_counter_has_neither_section(tmp_
     text = write_report([write_run(tmp_path / "a", scn, topo)], tmp_path / "out").read_text(encoding="utf-8")
     assert "Mesh reaction against node age" not in text
     assert "Stream idle timeouts" not in text
+
+
+def test_report_finds_the_bursts_of_idle_timeouts(tmp_path, scn, topo) -> None:
+    run = write_run(tmp_path / "a", scn, topo)
+    record = json.loads((run / "run.json").read_text())
+    cut = next(p for p in record["phases"] if p["name"] == "cut")
+    start = cut["start_ms"]
+    ticks = range(record["t0_ms"], record["end_ms"], 5000)
+
+    def count(t: int) -> float:
+        # 150 at 10 s, 250 more at 15 s, then nothing; 40 in the next phase, too few to be a burst.
+        after = (t - start) / 1000
+        return 7.0 + (150 if after >= 10 else 0) + (250 if after >= 15 else 0) + (40 if after >= 80 else 0)
+
+    (run / "metrics").mkdir()
+    (run / "metrics" / "stream_timeouts_by_region.json").write_text(
+        _vm([({"region": "inside", "type": "YamuxStream"}, [(t, count(t)) for t in ticks])])
+    )
+    text = write_report([run], tmp_path / "out").read_text(encoding="utf-8")
+    assert f"| {record['run_id']} | cut | inside | 10 | 15 | 15 | 400 |" in text
+    results = json.loads((tmp_path / "out" / "results.json").read_text())
+    assert results[0]["timeout_bursts"] == [
+        {"phase": "cut", "region": "inside", "from_s": 10, "to_s": 15, "peak_s": 15, "timeouts": 400}
+    ]

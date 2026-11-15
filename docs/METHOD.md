@@ -311,3 +311,63 @@ node, and changing it means building another image. The evidence would be timing
 node's own counter, not an intervention on the mechanism. Nor does it show why a node stops
 writing to a dead peer when it does, or how mplex and QUIC behave.
 
+## 13. Follow-up question: does the reaction move when the idle timeout is changed?
+
+Written on 2026-11-15, before any scenario below was run.
+
+Section 12 concluded that the multiplexer's idle check is what makes a node with default
+settings drop a dead peer. Its evidence was the source, the timing of the runs and the
+nodes' own counter. It did not change the timeout, and said so. This section does.
+
+**Change to the node.** The regression node is built from its own source
+(`iftech/dst-libp2p-test-node` at `fb8691e`, its own Dockerfile and lock file) with one
+change, `cluster/node/yamux-idle-timeout.patch`: the idle timeout of yamux streams, which
+nim-libp2p already takes as a parameter, is read from `YAMUX_IDLE_TIMEOUT_S`. Unset, it is
+the library's 300 s. The bootstrap node is the published image, unchanged.
+
+**Change to the tool.** A scenario may name an image built on the machine and pass settings
+to the node (`node.image`, `node.env`), and `cluster/build-node.sh` builds this one. The
+report lists the bursts in which a region's nodes closed streams for inactivity, which
+section 12 read from the evidence by hand.
+
+**Design.** Three arms that differ in that one setting and nothing else: `idle-check-120`,
+`idle-check-300`, `idle-check-600`. The regions, links and cut of `long-cut`, with the
+shutdown held for 1080 s instead of 900 s so that a late reaction still falls inside it.
+Three seeds each. Validity rules and limits are unchanged.
+
+The arm at 300 is the control: a node built here from source, with the default timeout,
+should behave as the published image did. If it does not, the build differs in some way that
+matters and the other two arms say nothing.
+
+Sections 11 and 12 put a node's last write to a dead peer between about 75 and 240 s after
+the cut. A stream is reset at the first check that finds a whole interval without a byte, so
+between one and two timeouts after that last write.
+
+| # | Prediction | Refuted if |
+|---|---|---|
+| P17 | With 300 s, the inside mesh first moves 480 to 600 s after the cut, and the median inside node is 900 to 975 s old when its mesh falls: the same as the published node. | Either is outside its window in any valid run. |
+| P18 | With 120 s, the inside mesh first moves 190 to 480 s after the cut. | It first moves outside that window in any valid run. |
+| P19 | With 600 s, the inside mesh first moves more than 700 s after the cut. | It first moves 700 s or less after the cut in any valid run. |
+| P20 | The peaks of consecutive bursts of yamux idle timeouts in the inside region during the shutdown are 270 to 330 s apart with 300 s and 570 to 630 s apart with 600 s. | Any pair of consecutive peaks is outside its window in any valid run. |
+
+No spacing is predicted for 120 s. In section 12 a burst lasted 100 to 160 s, so at that
+timeout the bursts would run into each other.
+
+**Reading the outcomes.**
+
+- P17 to P20 hold: the reaction to a silent cut moves with the yamux idle timeout, earlier
+  when it is shorter and later when it is longer. With the source, the timing and the
+  counter of section 12, that settles what the second timer is.
+- P17 fails: the node built here does not behave like the published one. The experiment is
+  void until the difference is found.
+- P17 holds and P18 or P19 fails: changing the timeout does not move the reaction as the
+  idle check would. Section 12's conclusion is withdrawn.
+- P20 fails alone: the reaction moves with the setting but the counter's cycle does not
+  follow it. Reported as open.
+
+**What it cannot show.** In the arm at 600 s the stream reset is due about 800 to 930 s
+after the cut. The kernel closes a silent connection after about 925 s, and the TCP
+transport has an idle check of its own every 600 s. A late reaction there shows that the
+yamux timeout was what produced nine minutes; it does not show which of the three ends the
+connection once yamux is out of the way. Nothing here concerns mplex or QUIC.
+

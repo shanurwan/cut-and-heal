@@ -128,3 +128,22 @@ def test_sysctls_reach_every_libp2p_pod_and_nothing_else(scn) -> None:
     assert len(sets) == 3 and all(d["spec"]["template"]["spec"]["securityContext"] == want for d in sets)
     others = [d for d in docs if d["kind"] in ("Pod", "Deployment")]
     assert all("sysctls" not in str(d) for d in others)
+
+
+def test_a_scenarios_own_node_replaces_the_published_one_in_gossip_pods_only(scn) -> None:
+    from cutandheal.model import Node
+
+    opt = RenderOptions(namespace="cah", run_id="r1", seed=7, controller_image="cah:test")
+    own = scn.model_copy(update={"node": Node(image="local-node:idle", env={"YAMUX_IDLE_TIMEOUT_S": "120"})})
+    docs = render(own, opt, "")
+    sets = {d["metadata"]["name"]: d for d in docs if d["kind"] == "StatefulSet"}
+    for region in ("inside", "outside"):
+        node, shaper = sets[region]["spec"]["template"]["spec"]["containers"]
+        assert node["image"] == shaper["image"] == "local-node:idle"
+        assert {"name": "YAMUX_IDLE_TIMEOUT_S", "value": "120"} in node["env"]
+        assert {"name": "MUXER", "value": "yamux"} in node["env"]
+        assert all(e["name"] != "YAMUX_IDLE_TIMEOUT_S" for e in shaper["env"])
+    boot = sets["bootstrap"]["spec"]["template"]["spec"]["containers"][0]
+    assert "@sha256:" in boot["image"] and "YAMUX_IDLE_TIMEOUT_S" not in str(boot)
+    # The run record names the image that really ran.
+    assert '"node": "local-node:idle"' in str(docs)

@@ -1,0 +1,24 @@
+diff --git a/nim-test-node/regression/node_setup.nim b/nim-test-node/regression/node_setup.nim
+index 5fdd7c9..363e44a 100644
+--- a/nim-test-node/regression/node_setup.nim
++++ b/nim-test-node/regression/node_setup.nim
+@@ -1,5 +1,6 @@
+ import os, strutils
+ 
++import chronos
+ import libp2p
+ import libp2p/[crypto/secp, multiaddress, muxers/mplex/lpchannel]
+ import libp2p/protocols/kademlia
+@@ -18,7 +19,11 @@ proc buildSwitch*(muxer: string, address: string): Switch =
+   of "quic":
+     builder = builder.withQuicTransport()
+   of "yamux":
+-    builder = builder.withTcpTransport(flags = {ServerFlags.TcpNoDelay}).withYamux()
++    # Idle timeout of every yamux stream, in seconds. Unset keeps the library default.
++    let idle = parseInt(getEnv("YAMUX_IDLE_TIMEOUT_S", "300")).seconds
++    builder = builder.withTcpTransport(flags = {ServerFlags.TcpNoDelay}).withYamux(
++        inTimeout = idle, outTimeout = idle
++      )
+   of "mplex":
+     builder = builder.withTcpTransport(flags = {ServerFlags.TcpNoDelay}).withMplex()
+   else:

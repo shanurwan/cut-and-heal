@@ -104,3 +104,14 @@ def test_only_tcp_sysctls_can_be_set() -> None:
     data["sysctls"] = {"kernel.shm_rmid_forced": "1"}
     with pytest.raises(ValidationError, match="not allowed"):
         Scenario.model_validate(data)
+
+
+def test_a_scenario_can_name_its_own_node_but_not_the_tools_settings() -> None:
+    data = _with()
+    assert Scenario.model_validate(data).node.image is None
+    data["node"] = {"image": "local-node:idle", "env": {"YAMUX_IDLE_TIMEOUT_S": "120"}}
+    assert Scenario.model_validate(data).node.env == {"YAMUX_IDLE_TIMEOUT_S": "120"}
+    for bad in ("MUXER", "SERVICE", "lower_case"):
+        data["node"] = {"env": {bad: "x"}}
+        with pytest.raises(ValidationError, match="not allowed"):
+            Scenario.model_validate(data)

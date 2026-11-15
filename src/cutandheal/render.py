@@ -62,6 +62,11 @@ def _pod_security(scn: Scenario) -> dict:
     return {"securityContext": {"sysctls": [{"name": k, "value": v} for k, v in sorted(scn.sysctls.items())]}}
 
 
+def node_image(scn: Scenario, opt: RenderOptions) -> str:
+    """The image of the node under test: the scenario's own, or the published one."""
+    return scn.node.image or opt.node_image
+
+
 def _node_statefulset(scn: Scenario, region: str, opt: RenderOptions) -> dict:
     labels = {ROLE_LABEL: "node", REGION_LABEL: region}
     return {
@@ -85,10 +90,11 @@ def _node_statefulset(scn: Scenario, region: str, opt: RenderOptions) -> dict:
                     "containers": [
                         {
                             "name": "node",
-                            "image": opt.node_image,
+                            "image": node_image(scn, opt),
                             "env": [
                                 {"name": "SERVICE", "value": "bootstrap"},
                                 {"name": "MUXER", "value": "yamux"},
+                                *({"name": k, "value": v} for k, v in sorted(scn.node.env.items())),
                             ],
                             "ports": [
                                 {"name": "libp2p", "containerPort": 5000},
@@ -101,7 +107,7 @@ def _node_statefulset(scn: Scenario, region: str, opt: RenderOptions) -> dict:
                             "name": "shaper",
                             # Same image as the node: it already ships tc, bash and curl,
                             # so a pod pulls nothing extra.
-                            "image": opt.node_image,
+                            "image": node_image(scn, opt),
                             "command": ["/usr/bin/bash", "/shaper/shaper.sh"],
                             "env": [
                                 {"name": "POD_NAME", "valueFrom": {"fieldRef": {"fieldPath": "metadata.name"}}},
@@ -163,7 +169,7 @@ def _bootstrap(scn: Scenario, opt: RenderOptions) -> list[dict]:
 
 def _controller(scn: Scenario, opt: RenderOptions, scenario_yaml: str) -> list[dict]:
     ns = opt.namespace
-    images = {"node": opt.node_image, "bootstrap": opt.bootstrap_image, "controller": opt.controller_image}
+    images = {"node": node_image(scn, opt), "bootstrap": opt.bootstrap_image, "controller": opt.controller_image}
     env = {
         "CAH_RUN_ID": opt.run_id,
         "CAH_SEED": str(opt.seed),

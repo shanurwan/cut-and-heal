@@ -264,6 +264,46 @@ def stream_timeouts(run: Run, stream_type: str = "YamuxStream", before_s: int = 
     return out
 
 
+def timeout_bursts(run: Run, stream_type: str = "YamuxStream", gap_s: int = 60, least: int = 100) -> list[dict]:
+    """For each phase after the first and each region: the bursts in which the region's nodes
+    closed streams of `stream_type` for inactivity.
+
+    A burst is a run of samples in which the nodes' counter rose, ended by `gap_s` seconds
+    without a rise; bursts of fewer than `least` timeouts are left out. `peak_s` is the sample
+    with the largest rise. Times are seconds after the phase began.
+    """
+    out = []
+    for series in load_metric(run.path, "stream_timeouts_by_region"):
+        if series["labels"].get("type") != stream_type:
+            continue
+        pts = list(zip(series["t"], series["v"], strict=True))
+        rises = [(t, v - v0) for (_t0, v0), (t, v) in zip(pts, pts[1:], strict=False) if v > v0]
+        for ph in run.phases[1:]:
+            bursts: list[list[tuple[int, float]]] = []
+            for t, dv in rises:
+                if not ph.start_ms <= t < ph.end_ms:
+                    continue
+                if bursts and t - bursts[-1][-1][0] <= gap_s * 1000:
+                    bursts[-1].append((t, dv))
+                else:
+                    bursts.append([(t, dv)])
+            for burst in bursts:
+                total = sum(dv for _t, dv in burst)
+                if total < least:
+                    continue
+                out.append(
+                    {
+                        "phase": ph.name,
+                        "region": series["labels"].get("region", "?"),
+                        "from_s": round((burst[0][0] - ph.start_ms) / 1000),
+                        "to_s": round((burst[-1][0] - ph.start_ms) / 1000),
+                        "peak_s": round((max(burst, key=lambda x: x[1])[0] - ph.start_ms) / 1000),
+                        "timeouts": round(total),
+                    }
+                )
+    return out
+
+
 def kernel_settings(run: Run) -> dict[str, dict[str, int]]:
     """Each TCP setting the shapers recorded, with the number of pods that had each value."""
     out: dict[str, dict[str, int]] = {}
@@ -361,6 +401,11 @@ def write_report(run_dirs: list[Path], out: Path) -> Path:
         f"- Publish rate {scn.publish.rate_hz:g} msg/s, {scn.publish.size_bytes} bytes, origins alternating "
         "between regions.",
         f"- System under test: `{images.get('node', 'unknown')}`.",
+        *(
+            ["- Node settings: " + ", ".join(f"`{k}={v}`" for k, v in sorted(scn.node.env.items())) + "."]
+            if scn.node.env
+            else []
+        ),
         f"- {len(runs)} run(s): {run_list}.",
         f"- A pair (message, receiving node) counts as delivered within {DEFAULTS.deadline_s:g} s. Steady-state "
         f"figures cover the last {DEFAULTS.steady_fraction:.0%} of each phase.",
@@ -505,6 +550,25 @@ def write_report(run_dirs: list[Path], out: Path) -> Path:
                     f"| {run_id} | {row['phase']} | {row['region']} | {row['reacted_after_s']} | {row['around']} "
                     f"| {row['earlier_in_phase']} |"
                 )
+    bursts = [(r.record.get("run_id"), timeout_bursts(r)) for r, *_ in valid]
+    if any(rows for _id, rows in bursts):
+        md += [
+            "",
+            "## Bursts of stream idle timeouts",
+            "",
+            "Stretches in which a region's nodes closed multiplexer streams for inactivity, from the same "
+            "counter. A burst ends after 60 s without a timeout; bursts of fewer than 100 are left out. "
+            "Seconds after the phase began.",
+            "",
+            "| Run | Phase | Region | From (s) | To (s) | Peak (s) | Timeouts |",
+            "|---|---|---|---|---|---|---|",
+        ]
+        for run_id, rows in bursts:
+            for row in rows:
+                md.append(
+                    f"| {run_id} | {row['phase']} | {row['region']} | {row['from_s']} | {row['to_s']} "
+                    f"| {row['peak_s']} | {row['timeouts']} |"
+                )
     kernels = [kernel_settings(r) for r, *_ in valid]
     if any(kernels):
         md += [
@@ -559,6 +623,7 @@ def write_report(run_dirs: list[Path], out: Path) -> Path:
                     "verdicts": [asdict(v) for v in vs], "cells": [asdict(c) for c in cs],
                     "transitions": [asdict(t) for t in trs], "kernel": kernel_settings(r),
                     "mesh_drop_ages": mesh_drop_ages(r), "stream_timeouts": stream_timeouts(r),
+                    "timeout_bursts": timeout_bursts(r),
                 }
                 for r, cs, trs, vs, ok in analysed
             ],

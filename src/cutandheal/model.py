@@ -24,6 +24,10 @@ Name = Annotated[str, Field(pattern=r"^[a-z][a-z0-9-]{0,30}$")]
 # namespace. `cluster/up.sh` allows the same pattern and nothing wider.
 SYSCTL = re.compile(r"^net\.ipv4\.tcp_[a-z0-9_]+$")
 
+# Settings the tool itself passes to a node; a scenario may not override them.
+RESERVED_ENV = frozenset({"SERVICE", "MUXER", "POD_NAME", "CAH_CONTROLLER"})
+ENV_NAME = re.compile(r"^[A-Z][A-Z0-9_]{0,40}$")
+
 
 class _Model(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -135,6 +139,25 @@ class Publish(_Model):
     topic: str = "test"
 
 
+class Node(_Model):
+    """The gossipsub node under test, for experiments that change the node itself.
+
+    `image` names an image already present on the cluster's machines, such as one built by
+    `cluster/build-node.sh`; None means the published regression node. `env` is passed to
+    the node's container.
+    """
+
+    image: str | None = None
+    env: dict[str, str] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _check(self) -> Node:
+        for key in self.env:
+            if not ENV_NAME.match(key) or key in RESERVED_ENV:
+                raise ValueError(f"node env {key!r} is not allowed: reserved by the tool, or not an upper-case name")
+        return self
+
+
 class Scenario(_Model):
     name: Name
     title: str
@@ -147,6 +170,7 @@ class Scenario(_Model):
     """Kernel TCP settings for every gossipsub node, for experiments that ask which timer
     governs a behaviour. Empty means the kernel defaults, which is what every report
     before `long-cut` used."""
+    node: Node = Node()
     timeline: tuple[Phase, ...] = Field(min_length=2)
 
     @model_validator(mode="after")

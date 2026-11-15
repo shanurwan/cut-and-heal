@@ -55,6 +55,10 @@ jobs:
           echo "KUBECONFIG=$PWD/.kube/kubeconfig.yaml" >> "$GITHUB_ENV"
           { nproc; free -g | sed -n 2p; uname -r; } | tr '\n' ' '
       - run: cluster/load-image.sh cut-and-heal:replay
+      - name: Build the scenario's own node, if it names one
+        run: |
+          image="$(python -c "import sys; from cutandheal.model import load_scenario; print(load_scenario(sys.argv[1]).node.image or '')" "scenarios/${{ inputs.scenario }}.yaml")"
+          if [ -n "$image" ]; then cluster/build-node.sh "$image"; fi
       - name: Run
         run: >-
           cah run "scenarios/${{ inputs.scenario }}.yaml" --run-id "$RUN_ID" --seed "${{ matrix.seed }}"
