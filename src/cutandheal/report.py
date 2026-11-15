@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 from dataclasses import asdict
 from pathlib import Path
+from statistics import median
 
 from .analyze import DEFAULTS, cells, delivery_series, transitions
 from .evidence import Run, load_metric, load_run
@@ -184,6 +185,82 @@ def mesh_reaction(run: Run, change: float = 0.1) -> list[dict]:
                     "reacted_after_s": None if moved is None else round((moved - ph.start_ms) / 1000),
                 }
             )
+    return out
+
+
+def mesh_drop_ages(run: Run) -> list[dict]:
+    """For each phase and region whose mean mesh moved: the pods whose own mesh fell below its
+    size at the start of the phase, and the median moment of that first fall, counted from the
+    change and from the start of the pod's node.
+
+    A reaction tied to the change comes the same number of seconds after it in every run. One
+    tied to a clock that began with the node, such as a periodic idle check, comes at the same
+    node age instead, whenever the change happened.
+    """
+    moved = {(row["phase"], row["region"]) for row in mesh_reaction(run) if row["reacted_after_s"] is not None}
+    by_pod = load_metric(run.path, "mesh_by_pod")
+    out = []
+    for ph in run.phases[1:]:
+        falls: dict[str, list[tuple[float, float]]] = {}
+        for series in by_pod:
+            region = series["labels"].get("region", "?")
+            started = run.started_ms.get(series["labels"].get("pod", ""))
+            pts = [(t, v) for t, v in zip(series["t"], series["v"], strict=True) if ph.start_ms <= t < ph.end_ms]
+            if started is None or not pts or (ph.name, region) not in moved:
+                continue
+            fell = next((t for t, v in pts if v < pts[0][1]), None)
+            if fell is not None:
+                falls.setdefault(region, []).append(((fell - ph.start_ms) / 1000, (fell - started) / 1000))
+        for region, rows in sorted(falls.items()):
+            out.append(
+                {
+                    "phase": ph.name,
+                    "region": region,
+                    "pods": len(rows),
+                    "after_change_s": round(median(a for a, _ in rows)),
+                    "node_age_at_change_s": round(median(age - a for a, age in rows)),
+                    "node_age_s": round(median(age for _, age in rows)),
+                }
+            )
+    return out
+
+
+def stream_timeouts(run: Run, stream_type: str = "YamuxStream", before_s: int = 25, after_s: int = 5) -> list[dict]:
+    """For each phase and region whose mean mesh moved: how many streams of `stream_type` the
+    region's nodes closed for inactivity around that moment, and how many earlier in the phase.
+
+    The count is the nodes' own counter. "Around" runs from `before_s` before the mesh moved to
+    `after_s` after it, which covers one scrape on either side.
+    """
+    counters = {
+        s["labels"].get("region", "?"): s
+        for s in load_metric(run.path, "stream_timeouts_by_region")
+        if s["labels"].get("type") == stream_type
+    }
+    if not counters:
+        return []
+
+    def at(series: dict, t_ms: float) -> float:
+        return next((v for t, v in zip(reversed(series["t"]), reversed(series["v"]), strict=True) if t <= t_ms), 0.0)
+
+    out = []
+    starts = {ph.name: ph.start_ms for ph in run.phases}
+    for row in mesh_reaction(run):
+        series = counters.get(row["region"])
+        if row["reacted_after_s"] is None or series is None:
+            continue
+        begin = starts[row["phase"]]
+        moved = begin + row["reacted_after_s"] * 1000
+        lo = max(begin, moved - before_s * 1000)
+        out.append(
+            {
+                "phase": row["phase"],
+                "region": row["region"],
+                "reacted_after_s": row["reacted_after_s"],
+                "around": round(at(series, moved + after_s * 1000) - at(series, lo)),
+                "earlier_in_phase": round(at(series, lo) - at(series, begin)),
+            }
+        )
     return out
 
 
@@ -388,6 +465,46 @@ def write_report(run_dirs: list[Path], out: Path) -> Path:
                 "never" if row["reacted_after_s"] is None else str(row["reacted_after_s"]) for row in rows
             )
             md.append(f"| {phase} | {region} | {at_start:.1f} | {at_end:.1f} | {reacted} |")
+    ages = [(r.record.get("run_id"), mesh_drop_ages(r)) for r, *_ in valid]
+    if any(rows for _id, rows in ages):
+        md += [
+            "",
+            "## Mesh reaction against node age",
+            "",
+            "For the pods whose own mesh fell below its size at the start of the phase: the median moment of "
+            "that first fall, counted from the change and from the start of the pod's node. A reaction tied to "
+            "the change keeps the first number from run to run; one tied to a clock that began with the node "
+            "keeps the last.",
+            "",
+            "| Run | Phase | Region | Pods | After the change (s) | Node age at the change (s) "
+            "| Node age at the fall (s) |",
+            "|---|---|---|---|---|---|---|",
+        ]
+        for run_id, rows in ages:
+            for row in rows:
+                md.append(
+                    f"| {run_id} | {row['phase']} | {row['region']} | {row['pods']} | {row['after_change_s']} "
+                    f"| {row['node_age_at_change_s']} | {row['node_age_s']} |"
+                )
+    timeouts = [(r.record.get("run_id"), stream_timeouts(r)) for r, *_ in valid]
+    if any(rows for _id, rows in timeouts):
+        md += [
+            "",
+            "## Stream idle timeouts when the mesh moved",
+            "",
+            "Multiplexer streams the region's nodes closed for inactivity, from the nodes' own counter "
+            "`libp2p_stream_timeouts`: from 25 s before the region's mean mesh first moved to 5 s after, and "
+            "earlier in the same phase.",
+            "",
+            "| Run | Phase | Region | Mesh moved after (s) | Timeouts around it | Earlier in the phase |",
+            "|---|---|---|---|---|---|",
+        ]
+        for run_id, rows in timeouts:
+            for row in rows:
+                md.append(
+                    f"| {run_id} | {row['phase']} | {row['region']} | {row['reacted_after_s']} | {row['around']} "
+                    f"| {row['earlier_in_phase']} |"
+                )
     kernels = [kernel_settings(r) for r, *_ in valid]
     if any(kernels):
         md += [
@@ -441,6 +558,7 @@ def write_report(run_dirs: list[Path], out: Path) -> Path:
                     "run_id": r.record.get("run_id"), "seed": r.seed, "valid": ok,
                     "verdicts": [asdict(v) for v in vs], "cells": [asdict(c) for c in cs],
                     "transitions": [asdict(t) for t in trs], "kernel": kernel_settings(r),
+                    "mesh_drop_ages": mesh_drop_ages(r), "stream_timeouts": stream_timeouts(r),
                 }
                 for r, cs, trs, vs, ok in analysed
             ],

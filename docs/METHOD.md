@@ -219,3 +219,95 @@ each window below is the kernel's time plus up to 35 s.
 keepalive or ping in the node's multiplexer and the gossipsub peer score; finding it means
 reading nim-libp2p, which is not part of this experiment.
 
+## 12. Follow-up question: is the second timer the multiplexer's idle check?
+
+Written on 2026-11-15, before any scenario below was run.
+
+Section 11 found that something other than the kernel ends connections about nine minutes
+after a silent cut, and could not say what. Two things were done since, neither of them a
+new run: the node's source was read, and the stored evidence was analysed again.
+
+**What the source says.** nim-libp2p at commit `73c3637` (2.4.0), the one the regression
+node's lock file pins:
+
+- Every yamux stream has an idle timeout of 5 minutes (`inTimeout`, `outTimeout` in
+  `libp2p/muxers/yamux/yamux.nim`).
+- The timeout is a periodic check, not a deadline. `timeoutMonitor` in
+  `libp2p/stream/connection.nim` sleeps for the timeout, then resets the stream only if no
+  byte was read or written since the previous check. A stream that goes idle is therefore
+  reset at the second check after its last byte: 5 to 10 minutes later, at a moment fixed by
+  when the stream was opened and not by when it went idle.
+- Gossipsub removes a peer from the mesh when its send stream to that peer is lost
+  (`onPubSubPeerEvent`, `StreamClosed`, in `libp2p/protocols/pubsub/gossipsub.nim`).
+- The regression node's own keepalive ping stops when the first message arrives
+  (`ping_utils.nim`), so it plays no part here.
+
+Two other paths were found that also end a stream to a peer that has stopped answering:
+yamux resets a stream whose send queue passes 256 KB once the peer's window is used up, and
+gossipsub disconnects a peer with 256 unfinished high-priority sends. Both would come a
+fixed amount of traffic after the cut, whatever the age of the stream.
+
+This is a reading of code, not a measurement.
+
+**What the stored runs say.** If the idle check is the second timer, the mesh should fall
+at a fixed age of the stream and not a fixed time after the cut. Stream ages are not
+recorded; node ages are, from the first line of each node's log. For the eight stored runs
+with default timers, the median inside node whose mesh fell:
+
+| Run | Node age at the cut (s) | Mesh fell after the cut (s) | Node age when it fell (s) |
+|---|---|---|---|
+| long-cut seed 2 | 347 | 567 | 919 |
+| long-cut seed 1 | 352 | 572 | 924 |
+| iran-2019-11 seed 4 | 359 | 564 | 929 |
+| iran-2019-11 seed 3 | 392 | 538 | 926 |
+| iran-2019-11 seed 1 | 406 | 528 | 935 |
+| iran-2019-11 seed 5 (withdrawn under V2) | 411 | 535 | 946 |
+| long-cut seed 3 | 420 | 537 | 958 |
+| iran-2019-11 seed 2 | 438 | 525 | 955 |
+
+The later the cut came in a node's life, the sooner the mesh reacted. Every fall came when
+the nodes were 919 to 958 s old, just past 900 s, the third 5-minute check. The age is not
+constant: it rises by about 40 s across the table. Streams are opened some time after the
+node starts, and a slower start-up would delay both the streams and the cut, but that is a
+guess. This table was computed after the idea was formed, so it is a reason to run the
+experiment and not a result of it.
+
+**Change to the tool.** The report now gives, per run, the node age at which the mesh
+fell. The controller exports the nodes' own counter of streams closed for inactivity,
+`libp2p_stream_timeouts`, by stream type, and the report states how many yamux streams the
+region closed around the moment its mesh moved.
+
+**Design.** `long-cut-late`, identical to `long-cut` except that the baseline is 390 s
+instead of 240 s, so the cut comes 150 s later in every node's life. Three seeds.
+`long-cut` once more, for the counter. Validity rules and limits are unchanged.
+
+With the cut 150 s later, the 5-minute check that follows it comes about 50 to 140 s after
+the cut instead of about 200 to 290 s. If the nodes have stopped writing to their dead
+peers by then, the streams are reset at the check after that, near a node age of 935 s. If
+they are still writing, the reset comes one check later, near 1235 s. Which of the two
+happens is not known; either one moves the reaction away from nine minutes.
+
+| # | Prediction | Refuted if |
+|---|---|---|
+| P14 | In every valid run of `long-cut-late`, the median inside node is 900 to 975 s old, or 1200 to 1275 s old, when its mesh first falls. In the `long-cut` run it is 900 to 975 s old. | The age is outside those windows in any valid run. |
+| P15 | In every valid run of `long-cut-late`, the inside mesh first moves either less than 480 s or more than 600 s after the cut. Every run so far with default timers or 13 retransmissions gave 492 to 582 s. | It first moves 480 to 600 s after the cut in any valid run. |
+| P16 | In every valid run of both scenarios, the inside nodes count at least 35 yamux stream idle timeouts from 25 s before the inside mesh first moves to 5 s after. A 10% fall of the mean mesh of 50 nodes is about 39 peers removed. | They count fewer than 35 in any valid run. |
+
+**Reading the outcomes.**
+
+- P14 to P16 hold: the second timer is the multiplexer's idle check. "Nine minutes" was a
+  5-minute limit plus the place where these scenarios happened to put the cut in the cycle
+  of the check. The same node reacts to a silent cut anywhere from 5 to 10 minutes later,
+  depending only on when the cut lands.
+- They hold with falls at 1200 to 1275 s: the same, and the nodes went on writing to dead
+  peers past the first check after the cut.
+- P15 fails: the reaction is tied to the cut after all. The idle check is not the second
+  timer, the pattern in the table above is unexplained, and the question stays open.
+- P14 and P15 hold and P16 fails: something on a 5-minute cycle, but not this counter.
+  Reported as open.
+
+**What it cannot show.** The idle timeout itself is not varied; it is compiled into the
+node, and changing it means building another image. The evidence would be timing and the
+node's own counter, not an intervention on the mechanism. Nor does it show why a node stops
+writing to a dead peer when it does, or how mplex and QUIC behave.
+

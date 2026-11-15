@@ -11,6 +11,7 @@ import gzip
 import json
 import re
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 
 from .model import Scenario
@@ -22,6 +23,7 @@ _RECV = re.compile(r"Received message\s.*?msgId=(\d+) sentAt=(\d+) current=(\d+)
 _KERNEL = re.compile(r"shaper kernel (\w+)=(\S+)")
 # The first line the node writes. Its absence means the log was rotated or truncated.
 START_MARKER = "Host info"
+_STARTED = re.compile(r"^\S+ (\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\.\d+[+-]\d\d:\d\d) +Host info", re.M)
 
 
 @dataclass
@@ -63,6 +65,8 @@ class Run:
     kernel: dict[str, dict[str, str]] = field(default_factory=dict)
     """Per pod, the kernel TCP settings its shaper read at start. Empty for evidence
     collected before shapers recorded them."""
+    started_ms: dict[str, int] = field(default_factory=dict)
+    """Per pod, the time on the first line its node wrote."""
 
     @property
     def seed(self) -> int:
@@ -95,6 +99,14 @@ def parse_node_log(text: str) -> tuple[list[tuple[int, int]], list[tuple[int, in
     return sent, recv, START_MARKER in text
 
 
+def node_started_ms(text: str) -> int | None:
+    """The time on the node's first line, or None if the line or its time is missing."""
+    m = _STARTED.search(text)
+    if m is None:
+        return None
+    return round(datetime.strptime(m[1], "%Y-%m-%d %H:%M:%S.%f%z").timestamp() * 1000)
+
+
 def parse_shaper_log(text: str) -> dict[str, str]:
     """The kernel settings a shaper recorded."""
     return dict(_KERNEL.findall(text))
@@ -116,12 +128,16 @@ def load_run(path: str | Path) -> Run:
     sent_per_pod: dict[str, int] = {}
     missing, no_start = [], []
     kernel: dict[str, dict[str, str]] = {}
+    started_ms: dict[str, int] = {}
     for pod in topo.pods:
         log_path = path / "logs" / f"{pod.name}.node.log.gz"
         if not log_path.exists():
             missing.append(pod.name)
             continue
-        sent, recv, started = parse_node_log(gzip.decompress(log_path.read_bytes()).decode("utf-8", "replace"))
+        text = gzip.decompress(log_path.read_bytes()).decode("utf-8", "replace")
+        sent, recv, started = parse_node_log(text)
+        if (at := node_started_ms(text)) is not None:
+            started_ms[pod.name] = at
         if not started:
             no_start.append(pod.name)
         sent_per_pod[pod.name] = len(sent)
@@ -164,6 +180,7 @@ def load_run(path: str | Path) -> Run:
         logs_without_start=no_start,
         orphan_receives=orphans,
         kernel=kernel,
+        started_ms=started_ms,
     )
 
 

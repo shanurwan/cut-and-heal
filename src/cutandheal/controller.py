@@ -52,6 +52,8 @@ VM_QUERIES = {
     "dial_rate_by_region": "sum by (region) (rate(libp2p_total_dial_attempts_total[20s]))",
     "failed_dial_rate_by_region": "sum by (region) (rate(libp2p_failed_dials_total[20s]))",
     "scraped_nodes_by_region": 'count by (region) (up{job="nodes"} == 1)',
+    # Streams the nodes themselves closed for inactivity, by stream type.
+    "stream_timeouts_by_region": "sum by (region, type) (libp2p_stream_timeouts_total)",
 }
 
 
