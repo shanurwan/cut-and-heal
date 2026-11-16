@@ -371,3 +371,92 @@ transport has an idle check of its own every 600 s. A late reaction there shows 
 yamux timeout was what produced nine minutes; it does not show which of the three ends the
 connection once yamux is out of the way. Nothing here concerns mplex or QUIC.
 
+## 14. Follow-up question: is a message sent into a shutdown lost, or only late?
+
+Written on 2026-11-16, before any scenario below was run.
+
+Gossipsub keeps no store of past messages beyond a few heartbeats. A message published while
+a border is shut can only cross later if it waited in a connection that survived the cut:
+in the kernel's send buffer, or queued in the multiplexer. Sections 10 to 13 found that a
+cut-off node keeps its connections to dead peers until an idle check in nim-libp2p ends
+them, 5 to 10 minutes after its last write. If that is all there is, a shutdown shorter than
+that check costs users nothing but delay, and a longer one loses everything sent during it.
+
+**What the stored runs already say.** The report now has a measure for this: of the
+messages published in one region while it had no path to another (leaving out the first
+2 s, when some were still in flight), the share of (message, node) pairs in the other region
+delivered by the end of the run, and when. Applied to evidence collected before this
+question was asked:
+
+| Shutdown | Runs | Delivered later, inside to outside | Last delivery after reopening | Inside mesh moved during the shutdown |
+|---|---|---|---|---|
+| 300 s (open-nodes-sweep seed 5, three cuts) | 1 | 100% | 51 to 57 s | never |
+| 600 s (iran-2019-11, valid seeds) | 4 | 0% | none | 535 to 574 s |
+| 900 s (long-cut) | 3 | 0% | none | 537 to 577 s |
+
+In the long shutdowns about 0.2% of pairs from outside to inside did cross, all within 3 s of
+the reopening and all from the last 2 to 3 s before it: the length of gossip's own history.
+These numbers were seen before the predictions below were written.
+
+**Design.** Six scenarios that differ only in how long the border stays shut:
+`cut-length-60`, `-240`, `-420`, `-500`, `-580` and `-720`. The regions and links of
+`long-cut`, a 240 s baseline, and 360 s after the reopening so that late deliveries are
+seen. Three seeds each, default kernel and node. Validity rules and limits are unchanged.
+The lengths bracket where the inside mesh moved in earlier runs with default settings,
+492 to 582 s after the cut.
+
+| # | Prediction | Refuted if |
+|---|---|---|
+| P21 | With 60, 240 and 420 s, at least 99% of pairs published during the shutdown are delivered by the end of the run, in both directions. | Below 99% in either direction in any valid run. |
+| P22 | With 720 s, at most 1% are, in both directions. | Above 1% in either direction in any valid run. |
+| P23 | In every valid run of any length, from inside to outside: if the inside mean mesh had not moved by more than 10% when the border reopened, at least 95% are delivered; if it first moved more than 60 s before the reopening, at most 5% are. | Either half fails in any valid run. Runs in which the mesh first moved in the last 60 s are not judged. |
+| P24 | In every valid run in which at least 95% are delivered, the last of them arrives within 125 s of the reopening, in both directions. Linux retransmits an unanswered segment at least every 120 s. | Any arrives later. |
+
+**Reading the outcomes.**
+
+- P21 to P24 hold: a shutdown shorter than the idle check delays messages by up to two
+  minutes and loses none; a longer one loses all of them, and the line is drawn by the
+  same check found in sections 12 and 13. For a messaging network, the cost of a short
+  outage is a timer setting.
+- P23 fails in its first half: messages are lost even though the connection has not been
+  dropped. Something else discards them, such as the multiplexer's send-queue limit.
+- P24 fails: messages survive but arrive later than the kernel's retransmission schedule
+  allows, so something above TCP holds them.
+
+**What it cannot show.** Any outage longer than 720 s. Messages larger or more frequent
+than 1000 bytes a second, which fill the multiplexer's 256 KB window sooner. Whether an
+application above gossipsub resends what was lost.
+
+## 15. A second outage: Iran, September 2022
+
+Written on 2026-11-16, before the scenario below was run.
+
+The first replay was one long total shutdown. Three years later the same country used a
+different tactic: from 21 September 2022, during the protests, mobile internet was cut every
+evening while fixed lines stayed up, and traffic came back each night. IODA's signal for
+22 September to 3 October repeats daily: about 72% of normal traffic in the day, 32% in the
+evening curfew, 100% late at night (`scenarios/iran-2022-09.yaml` has the derivation).
+
+**Design.** `iran-2022-09`: the regions and links of `iran-2019-11`, and two days of the
+cycle, each phase 660 s. The real phases last hours, far longer than the 5 to 10 minutes a
+node takes to drop a dead peer; 660 s keeps each phase on the same side of that. The share of
+traffic is read as the share of inside nodes with a border link, as in 2019, so 36 nodes are
+open in the day, 16 in the curfew and 50 at night. Nodes are opened in a fixed seeded order,
+so each curfew closes 20 of the day's 36, each night reopens all 34 that are closed, and each
+morning closes 14 again. Three seeds.
+
+| # | Prediction | Refuted if |
+|---|---|---|
+| P25 | In the steady state of every phase, at least 99% of pairs are delivered within 10 s, inside, outside, and across the border in both directions. In 2019, two open nodes in fifty were enough. | Any of these is below 99% in any phase of any valid run. |
+| P26 | The second day costs no more than the first: for each phase of day 2 and each direction across the border, the steady-state median latency is within 25% of the same phase on day 1. | It differs by more in any valid run. |
+
+**Observed but not predicted.** The 2019 runs found crossing outward about four times slower
+than at baseline while only some inside nodes were open. Its phases were shorter than the
+idle check, so dead peers were still in the mesh throughout. The report gives the median
+latency per phase; whether outward crossing is slower in the curfew, and whether that
+lasts after the dead peers are dropped, is read from it without a prediction.
+
+**What it cannot show.** Throttling. The fixed lines that stayed up in 2022 were also slow,
+and nothing here models a slow or lossy border; every open node has the healthy link. Mobile
+and fixed users who are the same people, or move between networks. More than two days.
+

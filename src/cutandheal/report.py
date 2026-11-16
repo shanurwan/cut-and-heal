@@ -14,7 +14,7 @@ from statistics import median
 
 from .analyze import DEFAULTS, cells, delivery_series, transitions
 from .evidence import Run, load_metric, load_run
-from .plan import open_order
+from .plan import expected_reach, open_order
 from .validity import judge
 
 # Categorical slots in fixed order; a region keeps its colour in every figure.
@@ -304,6 +304,54 @@ def timeout_bursts(run: Run, stream_type: str = "YamuxStream", gap_s: int = 60, 
     return out
 
 
+def held_messages(run: Run, guard_s: float = 2.0) -> list[dict]:
+    """For each phase in which a pair of regions had no path, followed by a phase in which it
+    had one again: of the messages published in the first region during the closed phase, the
+    share of (message, node) pairs in the second that were delivered by the end of the run, and
+    when those deliveries came, in seconds after the path reopened. Messages published in the
+    first `guard_s` of the phase are left out: they may have crossed before the cut landed.
+
+    Gossipsub keeps no store of past messages beyond a few heartbeats, so a message that crosses
+    after a reopening was held in a connection that survived the cut.
+    """
+    by_region: dict[str, list[str]] = {}
+    for pod in run.topology.pods:
+        by_region.setdefault(pod.region, []).append(pod.name)
+    moved = {(row["phase"], row["region"]): row["reacted_after_s"] for row in mesh_reaction(run)}
+    out = []
+    for ph, nxt in zip(run.phases, run.phases[1:], strict=False):
+        closed = expected_reach(run.scenario, run.topology, ph.index, run.seed)
+        after = expected_reach(run.scenario, run.topology, nxt.index, run.seed)
+        for (src, dst), ok in sorted(closed.items()):
+            if ok or src == dst or not after[(src, dst)]:
+                continue
+            # Messages already in flight when the cut landed are not held; skip the first seconds.
+            begin = ph.start_ms + guard_s * 1000
+            msgs = [m for m in run.messages if m.origin_region == src and begin <= m.sent_ns / 1e6 < ph.end_ms]
+            lags = sorted(
+                (m.received[pod] / 1e6 - ph.end_ms) / 1000 for m in msgs for pod in by_region[dst] if pod in m.received
+            )
+            pairs = len(msgs) * len(by_region[dst])
+            reacted = moved.get((ph.name, src))
+            out.append(
+                {
+                    "phase": ph.name,
+                    "src": src,
+                    "dst": dst,
+                    "closed_s": round((ph.end_ms - ph.start_ms) / 1000),
+                    "messages": len(msgs),
+                    "pairs": pairs,
+                    "delivered": len(lags),
+                    "ratio": len(lags) / pairs if pairs else None,
+                    "first_s": round(lags[0], 1) if lags else None,
+                    "median_s": round(median(lags), 1) if lags else None,
+                    "last_s": round(lags[-1], 1) if lags else None,
+                    "src_mesh_moved_after_s": reacted,
+                }
+            )
+    return out
+
+
 def kernel_settings(run: Run) -> dict[str, dict[str, int]]:
     """Each TCP setting the shapers recorded, with the number of pods that had each value."""
     out: dict[str, dict[str, int]] = {}
@@ -510,6 +558,31 @@ def write_report(run_dirs: list[Path], out: Path) -> Path:
                 "never" if row["reacted_after_s"] is None else str(row["reacted_after_s"]) for row in rows
             )
             md.append(f"| {phase} | {region} | {at_start:.1f} | {at_end:.1f} | {reacted} |")
+    held = [(r.record.get("run_id"), held_messages(r)) for r, *_ in valid]
+    if any(rows for _id, rows in held):
+        md += [
+            "",
+            "## Messages sent while a border was shut",
+            "",
+            "Of the messages published in one region while it had no path to another, the share of (message, "
+            "node) pairs in the other region delivered by the end of the run, and when, in seconds after the "
+            "path reopened. The last column is when the sending region's mean mesh first moved by more than "
+            "10% during the shutdown, if it did.",
+            "",
+            "| Run | Phase | From | To | Shut (s) | Messages | Delivered later | First (s) | Median (s) | Last (s) "
+            "| Sender's mesh moved after (s) |",
+            "|---|---|---|---|---|---|---|---|---|---|---|",
+        ]
+        for run_id, rows in held:
+            for row in rows:
+                ratio = "n/a" if row["ratio"] is None else f"{row['ratio']:.2%}"
+                cells_ = [row[k] for k in ("first_s", "median_s", "last_s")]
+                when = ["" if v is None else f"{v:g}" for v in cells_]
+                moved = "never" if row["src_mesh_moved_after_s"] is None else str(row["src_mesh_moved_after_s"])
+                md.append(
+                    f"| {run_id} | {row['phase']} | {row['src']} | {row['dst']} | {row['closed_s']} "
+                    f"| {row['messages']} | {ratio} | {when[0]} | {when[1]} | {when[2]} | {moved} |"
+                )
     ages = [(r.record.get("run_id"), mesh_drop_ages(r)) for r, *_ in valid]
     if any(rows for _id, rows in ages):
         md += [
@@ -623,7 +696,7 @@ def write_report(run_dirs: list[Path], out: Path) -> Path:
                     "verdicts": [asdict(v) for v in vs], "cells": [asdict(c) for c in cs],
                     "transitions": [asdict(t) for t in trs], "kernel": kernel_settings(r),
                     "mesh_drop_ages": mesh_drop_ages(r), "stream_timeouts": stream_timeouts(r),
-                    "timeout_bursts": timeout_bursts(r),
+                    "timeout_bursts": timeout_bursts(r), "held_messages": held_messages(r),
                 }
                 for r, cs, trs, vs, ok in analysed
             ],

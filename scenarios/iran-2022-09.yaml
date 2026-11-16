@@ -1,0 +1,77 @@
+# Iran, 21 September to early October 2022: a nightly curfew on mobile internet during the
+# protests, with fixed lines up but throttled, and the international internet back each night.
+#
+# What comes from data: the daily order of the three levels and the share of normal traffic in
+# each. What is an assumption: link delays and rates, region sizes, and reading "share of normal
+# cross-border traffic" as "share of nodes that still have a border link", as in iran-2019-11.
+# What is deliberately not kept: durations. Each phase lasts eleven minutes so that, like the
+# real eight-hour curfew, it outlasts the five-to-ten minutes a node takes to drop a dead peer.
+name: iran-2022-09
+title: Iran, September 2022 - a nightly partial shutdown, repeated
+
+source:
+  event: Nightly mobile internet curfew during the protests, Iran, 21 September to 3 October 2022
+  dataset: IODA gtr-norm (traffic to Google services, normalised), country IR
+  url: https://ioda.live/country/IR?from=1662940800&until=1665187200
+  window_utc: ["2022-09-12", "2022-10-08"]
+  retrieved: "2026-11-16"
+  method: >-
+    fetch_ioda("IR", "2022-09-12", "2022-10-08", baseline_days=3): each half-hour sample divided
+    by the median of the same slot over 12-14 September. From 22 September to 5 October the
+    signal repeats daily. Medians of the samples in three daily windows: 13:30-20:30 UTC 0.32
+    (quartiles 0.29, 0.39); 01:00-12:30 UTC 0.72 (0.66, 0.79); 21:00-24:00 UTC 1.00. The
+    15:00-19:00 UTC mean is below 0.5 on every evening from 22 September to 3 October except
+    29 September (0.49). Two of those days are replayed.
+
+regions:
+  ir:
+    nodes: 50
+    description: Nodes inside the country, on the domestic network
+    domestic: {delay_ms: 20, jitter_ms: 4, rate_mbit: 50}
+  world:
+    nodes: 100
+    description: Nodes everywhere else
+    domestic: {delay_ms: 50, jitter_ms: 10, rate_mbit: 50}
+
+borders:
+  ir-world:
+    between: [ir, world]
+    gated: ir
+    healthy: {delay_ms: 100, jitter_ms: 20, loss_pct: 0.5, rate_mbit: 20}
+
+bootstrap_region: world
+
+publish:
+  rate_hz: 1
+  size_bytes: 1000
+
+timeline:
+  - name: baseline
+    duration_s: 240
+    note: Before 21 September. Availability 1.00.
+  - name: day-1
+    duration_s: 660
+    note: 01:00-12:30 UTC. Median availability 0.72; 36 of 50 nodes.
+    borders:
+      ir-world: {open_fraction: 0.72}
+  - name: curfew-1
+    duration_s: 660
+    note: 13:30-20:30 UTC. Median availability 0.32; 16 of 50 nodes.
+    borders:
+      ir-world: {open_fraction: 0.32}
+  - name: night-1
+    duration_s: 660
+    note: 21:00-24:00 UTC. Availability 1.00.
+  - name: day-2
+    duration_s: 660
+    note: The same as day-1.
+    borders:
+      ir-world: {open_fraction: 0.72}
+  - name: curfew-2
+    duration_s: 660
+    note: The same as curfew-1.
+    borders:
+      ir-world: {open_fraction: 0.32}
+  - name: night-2
+    duration_s: 660
+    note: The same as night-1.

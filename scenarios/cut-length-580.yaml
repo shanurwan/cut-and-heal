@@ -1,0 +1,30 @@
+# One arm of the question in docs/METHOD.md section 14: is a message sent into a shutdown
+# delivered once the border reopens, and does that depend on how long the shutdown lasted?
+# The regions and links of long-cut, with the border shut for 580 s.
+name: cut-length-580
+title: A 580-second shutdown
+
+regions:
+  ir:
+    nodes: 50
+    domestic: {delay_ms: 20, jitter_ms: 4, rate_mbit: 50}
+  world:
+    nodes: 100
+    domestic: {delay_ms: 50, jitter_ms: 10, rate_mbit: 50}
+
+borders:
+  ir-world:
+    between: [ir, world]
+    gated: ir
+    healthy: {delay_ms: 100, jitter_ms: 20, loss_pct: 0.5, rate_mbit: 20}
+
+bootstrap_region: world
+
+publish:
+  rate_hz: 1
+  size_bytes: 1000
+
+timeline:
+  - {name: baseline, duration_s: 240}
+  - {name: shut, duration_s: 580, borders: {ir-world: {open_nodes: 0}}}
+  - {name: restored, duration_s: 360}

@@ -114,3 +114,25 @@ def test_report_finds_the_bursts_of_idle_timeouts(tmp_path, scn, topo) -> None:
     assert results[0]["timeout_bursts"] == [
         {"phase": "cut", "region": "inside", "from_s": 10, "to_s": 15, "peak_s": 15, "timeouts": 400}
     ]
+
+
+def test_report_follows_messages_held_through_a_shutdown(tmp_path, scn, topo) -> None:
+    # In the cut phase (60 s), messages from inside cross 30 s after the border reopens and
+    # messages from outside never do; everything else is delivered at once.
+    def held(phase: str, origin: str, receiver: str, t: float) -> float | None:
+        crossing = origin.split("-")[0] != receiver.split("-")[0]
+        if phase != "cut" or not crossing:
+            return 120.0
+        return (60 - t + 30) * 1000 if origin.startswith("inside") else None
+
+    run = write_run(tmp_path / "a", scn, topo, held, respect_borders=False)
+    text = write_report([run], tmp_path / "out").read_text(encoding="utf-8")
+    assert "is withdrawn" not in text
+    results = json.loads((tmp_path / "out" / "results.json").read_text())
+    rows = {(r["src"], r["dst"]): r for r in results[0]["held_messages"]}
+    assert set(rows) == {("inside", "outside"), ("outside", "inside")}
+    out = rows[("inside", "outside")]
+    assert out["phase"] == "cut" and out["closed_s"] == 60 and out["ratio"] == 1.0
+    assert out["first_s"] == out["last_s"] == 30.0
+    assert rows[("outside", "inside")]["ratio"] == 0.0 and rows[("outside", "inside")]["last_s"] is None
+    assert "| cut | inside | outside | 60 |" in text and "| 100.00% | 30 | 30 | 30 |" in text
