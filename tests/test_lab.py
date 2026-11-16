@@ -109,3 +109,35 @@ def test_a_policy_cut_reports_leaks_as_a_result_not_a_fault(tmp_path) -> None:
     results = json.loads((tmp_path / "out" / "results.json").read_text())
     v4 = next(v for v in results[0]["verdicts"] if v["rule"] == "V4")
     assert v4["passed"] and v4["detail"].startswith("measured, not judged") and "received" in v4["detail"]
+
+
+def test_a_policy_cut_probes_fresh_connections_from_the_first_pod_of_each_region(tmp_path) -> None:
+    scn = _policy_scn()
+    opt = RenderOptions(namespace="cah", run_id="r1", seed=7, controller_image="cah:test")
+    sets = {d["metadata"]["name"]: d for d in render(scn, opt, "") if d["kind"] == "StatefulSet"}
+    env = {r: sets[r]["spec"]["template"]["spec"]["containers"][1]["env"] for r in ("inside", "outside")}
+    assert {"name": "CAH_PROBE", "value": "bootstrap:5000"} in env["inside"]
+    assert {"name": "CAH_PROBE", "value": "inside-0.nodes:5000"} in env["outside"]
+    plain = {
+        d["metadata"]["name"]: d for d in render(Scenario.model_validate(WHOLE), opt, "") if d["kind"] == "StatefulSet"
+    }
+    assert "CAH_PROBE" not in str(plain)
+
+    topo = make_topology(scn)
+    run = write_run(tmp_path / "a", scn, topo)
+    record = json.loads((run / "run.json").read_text())
+    cut = next(p for p in record["phases"] if p["name"] == "cut")
+    lines = []
+    for k in range(6):
+        at = cut["start_ms"] + k * 10_000
+        rc, err = ("124", "") if k % 2 else ("1", "connect:_Connection_refused")
+        lines.append(f"2026-01-01T00:00:00Z shaper probe target=bootstrap:5000 at_ms={at} rc={rc} err={err}")
+    import gzip as gz
+
+    (run / "logs" / "inside-0.shaper.log.gz").write_bytes(gz.compress(("\n".join(lines) + "\n").encode()))
+    (run / "lab").mkdir()
+    (run / "lab" / "host.txt").write_text("4 CPUs,\nAMD EPYC 7763\n, kernel 7.0.0\n")
+    text = write_report([run], tmp_path / "out").read_text(encoding="utf-8")
+    # Probes at 0 and 10 s fall in the first 20 s and are left out.
+    assert "| synthetic | inside-0 | cut | bootstrap:5000 | 4 | 0 | 2 | 2 |" in text
+    assert "Runner of `synthetic`: 4 CPUs, AMD EPYC 7763 , kernel 7.0.0." in text

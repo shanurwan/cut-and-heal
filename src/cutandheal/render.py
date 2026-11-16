@@ -62,6 +62,20 @@ def _pod_security(scn: Scenario) -> dict:
     return {"securityContext": {"sysctls": [{"name": k, "value": v} for k, v in sorted(scn.sysctls.items())]}}
 
 
+def _probe_env(scn: Scenario, region: str) -> list[dict]:
+    """For a scenario that shuts borders with policies, a target across the first border for
+    the shaper's probe of fresh connections: the bootstrap node, or the gated region's first
+    node seen from the bootstrap's side."""
+    if scn.cut != "networkpolicy" or not scn.borders:
+        return []
+    border = next(iter(scn.borders.values()))
+    other = border.other(region) if region in border.between else None
+    if other is None:
+        return []
+    target = "bootstrap:5000" if other == scn.bootstrap_region else f"{other}-0.nodes:5000"
+    return [{"name": "CAH_PROBE", "value": target}]
+
+
 def node_image(scn: Scenario, opt: RenderOptions) -> str:
     """The image of the node under test: the scenario's own, or the published one."""
     return scn.node.image or opt.node_image
@@ -112,6 +126,7 @@ def _node_statefulset(scn: Scenario, region: str, opt: RenderOptions) -> dict:
                             "env": [
                                 {"name": "POD_NAME", "valueFrom": {"fieldRef": {"fieldPath": "metadata.name"}}},
                                 {"name": "CAH_CONTROLLER", "value": "http://controller:8080"},
+                                *_probe_env(scn, region),
                             ],
                             "securityContext": {"capabilities": {"add": ["NET_ADMIN"]}},
                             "volumeMounts": [{"name": "shaper", "mountPath": "/shaper"}],

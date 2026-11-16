@@ -1,0 +1,33 @@
+# One arm of the question in docs/METHOD.md sections 16 and 20: how much CPU can the lab take away
+# before the measurement changes, and do the validity rules notice?
+# The region nodes share 3000 millicores, a third to ir and two thirds to world.
+name: lab-cpu-3000
+title: A short shutdown with 3000 millicores for all region nodes
+
+regions:
+  ir:
+    nodes: 50
+    domestic: {delay_ms: 20, jitter_ms: 4, rate_mbit: 50}
+  world:
+    nodes: 100
+    domestic: {delay_ms: 50, jitter_ms: 10, rate_mbit: 50}
+
+borders:
+  ir-world:
+    between: [ir, world]
+    gated: ir
+    healthy: {delay_ms: 100, jitter_ms: 20, loss_pct: 0.5, rate_mbit: 20}
+
+bootstrap_region: world
+
+publish:
+  rate_hz: 1
+  size_bytes: 1000
+
+lab:
+  cpus: {ir: 1.000, world: 2.000}
+
+timeline:
+  - {name: baseline, duration_s: 360}
+  - {name: shut, duration_s: 240, borders: {ir-world: {open_nodes: 0}}}
+  - {name: restored, duration_s: 240}

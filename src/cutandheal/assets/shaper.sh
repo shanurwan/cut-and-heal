@@ -76,6 +76,24 @@ while IFS='|' read -r at phase args; do
 done <<<"$plan"
 log "plan received phases=${#phases[@]}"
 
+# 3b. With CAH_PROBE=host:port, the first pod of a region opens a fresh TCP connection to it
+#     every 10 s and logs the outcome. Gossip runs over connections that already exist; this
+#     shows whether a new one can be made. rc 0 is connected, 124 is no answer within 3 s (a
+#     silent drop), anything else is a refusal or an error, logged with its message.
+if [ -n "${CAH_PROBE:-}" ] && [ "${POD##*-}" = 0 ]; then
+  (
+    host="${CAH_PROBE%:*}" port="${CAH_PROBE##*:}"
+    while :; do
+      now
+      at=$NOW_MS
+      err="$(timeout 3 bash -c "exec 3<>/dev/tcp/$host/$port" 2>&1)"
+      rc=$?
+      log "probe target=$CAH_PROBE at_ms=$at rc=$rc err=${err//[$'\n' ]/_}"
+      nap_ms 10000
+    done
+  ) &
+fi
+
 # 4. Run it.
 for i in "${!phases[@]}"; do
   now

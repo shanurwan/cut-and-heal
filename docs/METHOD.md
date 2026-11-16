@@ -612,3 +612,44 @@ cannot be read by this tool:
 Each is a change to the go node, not to the network or to this tool. The rust node was not
 examined.
 
+## 20. Reruns on 17 November
+
+Written on 2026-11-17, before any run below, after the runs of sections 14 to 18.
+
+**What went wrong on 16 November.** The same workload made the 4-CPU runner about twice as
+busy as on 14 November: host CPU at the median 52 to 57% in `lab-cpu-uncapped`, against 26%
+in `long-cut`. Of 48 runs, 18 were withdrawn, all three of `iran-2022-09` among them. And the
+caps of section 16 were set from the host's load during earlier runs, which leaves out start-
+up: uncapped, the region nodes used 0.68 to 0.76 cores (`ir`) and 1.22 to 1.26 cores
+(`world`) on average over the whole run. With 1000 millicores or less no capped run formed
+its network, so P27 to P29 could not be judged; P30 held. Those runs stay in the record.
+
+**Changes to the tool.**
+
+- Each run records the runner it had (CPUs, CPU model, kernel), so a difference between days
+  can be seen in the evidence.
+- In a policy cut, the first pod of each region opens a fresh TCP connection across the border
+  every 10 s and logs how it ended: connected, no answer within 3 s, or refused. Section 17's
+  runs could not tell a policy that leaves existing connections alone from one that is not
+  enforced at all, because the nodes made no new connection during them.
+
+**Runs.**
+
+- `lab-cpu-uncapped` seeds 4 to 6, as the same-day reference, and `lab-cpu-3000`, `-2000`
+  and `-1500` (a third to `ir`, two thirds to `world`), seeds 1 to 3. Around the measured
+  average of about two cores.
+- `policy-cut` seeds 4 to 6 with the probe. P31 and P32 are judged again on these runs.
+- `iran-2022-09` seeds 4 to 6. P25 and P26 are judged on these runs.
+
+| # | Prediction | Refuted if |
+|---|---|---|
+| P36 | With 3000 millicores, every valid run's median delivery from inside to inside in the baseline's steady state is within 25% of the mean of the valid uncapped runs of the same day. | Any differs by more. |
+| P37 | With 1500 millicores, at most one run of three completes its timeline. | Two or more complete. |
+| P38 | With 2000 millicores, at least one run passes all seven rules with that median at least 50% above the uncapped mean, and its region nodes throttled in at least 20% of scheduler periods. | No such run. |
+| P39 | In the policy cut, every probe from `ir-0` to the bootstrap node in the steady part of the shut phase fails, and every probe in the baseline and after the reopening connects. | Any probe in the shut phase connects, or any outside it fails. |
+
+**Reading the outcomes.** P39 holding while messages still cross means the policy is
+enforced for new connections and leaves existing ones alone; the probe's failures say whether
+it drops (no answer) or refuses. P39 failing in the shut phase means the policy was not
+enforced in this cluster at all, and section 17's result says nothing about policies.
+

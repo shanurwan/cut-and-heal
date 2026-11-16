@@ -7,6 +7,9 @@ NAME="${CAH_CLUSTER:-cah}"
 WHEN="${1:?usage: $0 start|end <dir>}"
 DIR="${2:?usage: $0 start|end <dir>}"
 mkdir -p "$DIR"
+if [ "$WHEN" = start ]; then
+  { echo "$(nproc) CPUs,"; lscpu | sed -n "s/^Model name: *//p" | head -1; echo ", kernel $(uname -r)"; } >"$DIR/host.txt"
+fi
 for node in $(docker ps --format '{{.Names}}' --filter "network=$NAME" | grep -v -- "-control$"); do
   id="$(docker inspect -f '{{.Id}}' "$node")"
   stat="$(find /sys/fs/cgroup -maxdepth 4 -type d -name "*$id*" 2>/dev/null | head -1)/cpu.stat"

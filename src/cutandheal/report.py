@@ -8,7 +8,9 @@ to the person who signs the report.
 from __future__ import annotations
 
 import csv
+import gzip
 import json
+import re
 from dataclasses import asdict
 from pathlib import Path
 from statistics import median
@@ -392,6 +394,47 @@ def region_cpu(run: Run) -> list[dict]:
     return out
 
 
+_PROBE = re.compile(r"shaper probe target=(\S+) at_ms=(\d+) rc=(\d+) err=(\S*)")
+
+
+def probes(run: Run) -> list[dict]:
+    """Fresh connections across a border, tried every 10 s by the first pod of each region in a
+    policy cut: per pod and phase, how many were tried and how each ended. Probes in the first
+    20 s of a phase are left out, while a policy may still be on its way."""
+    out = []
+    for path in sorted((run.path / "logs").glob("*-0.shaper.log.gz")):
+        pod = path.name.removesuffix(".shaper.log.gz")
+        text = gzip.decompress(path.read_bytes()).decode("utf-8", "replace")
+        rows: dict[tuple[str, str], dict] = {}
+        for target, at, rc, err in _PROBE.findall(text):
+            ph = run.phase_of(int(at))
+            if ph is None or int(at) < ph.start_ms + 20_000:
+                continue
+            row = rows.setdefault((ph.name, target), {"pod": pod, "phase": ph.name, "target": target,
+                                                       "tried": 0, "connected": 0, "no_answer": 0, "refused": 0,
+                                                       "errors": set()})  # fmt: skip
+            row["tried"] += 1
+            if rc == "0":
+                row["connected"] += 1
+            elif rc == "124":
+                row["no_answer"] += 1
+            else:
+                row["refused"] += 1
+                row["errors"].add(err[:60])
+        order = {p.name: p.index for p in run.phases}
+        for key in sorted(rows, key=lambda k: order[k[0]]):
+            row = rows[key]
+            row["errors"] = sorted(row["errors"])
+            out.append(row)
+    return out
+
+
+def runner(run: Run) -> str | None:
+    """The machine a run had, as the workflow recorded it."""
+    path = run.path / "lab" / "host.txt"
+    return " ".join(path.read_text(encoding="utf-8").split()) if path.exists() else None
+
+
 def policy_timing(run: Run) -> list[dict]:
     """For a run that shut borders with NetworkPolicies: each request, how long the API took to
     answer, and its status."""
@@ -527,6 +570,7 @@ def write_report(run_dirs: list[Path], out: Path) -> Path:
             else []
         ),
         f"- {len(runs)} run(s): {run_list}.",
+        *([f"- Runner of `{r.record.get('run_id')}`: {runner(r)}." for r in runs if runner(r)]),
         f"- A pair (message, receiving node) counts as delivered within {DEFAULTS.deadline_s:g} s. Steady-state "
         f"figures cover the last {DEFAULTS.steady_fraction:.0%} of each phase.",
         "",
@@ -562,6 +606,25 @@ def write_report(run_dirs: list[Path], out: Path) -> Path:
                 share = "n/a" if row["throttled_share"] is None else f"{row['throttled_share']:.1%}"
                 md.append(
                     f"| {run_id} | {row['node']} | {row['seconds']} | {row['cores']} | {share} | {row['throttled_s']} |"
+                )
+    probed = [(r.record.get("run_id"), probes(r)) for r, *_ in analysed]
+    if any(rows for _id, rows in probed):
+        md += [
+            "",
+            "## Fresh connections across the border",
+            "",
+            "Every 10 s the first pod of each region opened a new TCP connection across the border, with a 3 s "
+            "limit; the first 20 s of each phase are left out. *No answer* is a silent drop, *refused* a "
+            "refusal or error.",
+            "",
+            "| Run | Pod | Phase | Target | Tried | Connected | No answer | Refused |",
+            "|---|---|---|---|---|---|---|---|",
+        ]
+        for run_id, rows in probed:
+            for row in rows:
+                md.append(
+                    f"| {run_id} | {row['pod']} | {row['phase']} | {row['target']} | {row['tried']} "
+                    f"| {row['connected']} | {row['no_answer']} | {row['refused']} |"
                 )
     policies = [(r.record.get("run_id"), policy_timing(r)) for r, *_ in analysed]
     if any(rows for _id, rows in policies):
@@ -807,6 +870,7 @@ def write_report(run_dirs: list[Path], out: Path) -> Path:
                     "mesh_drop_ages": mesh_drop_ages(r), "stream_timeouts": stream_timeouts(r),
                     "timeout_bursts": timeout_bursts(r), "held_messages": held_messages(r),
                     "region_cpu": region_cpu(r), "policies": policy_timing(r),
+                    "probes": probes(r), "runner": runner(r),
                 }
                 for r, cs, trs, vs, ok in analysed
             ],
