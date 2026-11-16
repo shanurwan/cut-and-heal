@@ -220,7 +220,8 @@ three runs per arm and not a tested claim.
 - **Other transports.** In the source mplex has the same 5-minute default; QUIC has its own
   idle timeout. Neither was run.
 - **That a shorter timeout is better.** It also closes connections sooner on a link that is
-  only slow. No lossy-but-alive scenario was run with it.
+  only slow. Since tested in [lossy-border](../lossy-border/README.md): free at 10% loss,
+  a steady loss of peers at 30%.
 - **Anything at the scale of a public network.** These are 150 nodes on one 4-CPU machine.
 
 ## Why it matters for testing

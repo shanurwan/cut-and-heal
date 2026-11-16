@@ -67,6 +67,17 @@ alone changed nothing, which refuted a prediction of mine. Twenty-seven valid ru
 predictions written first of which ten held, and two conclusions of mine corrected along the
 way. See [reports/long-cut](reports/long-cut/README.md).
 
+What happens to the messages, then? Six shutdowns from 60 to 720 s: up to 500 s every
+message sent during the cut was delivered once the border reopened, within 102 s; at 720 s
+0 to 7% were. A shutdown shorter than the idle check costs users only delay, a longer one
+loses what they sent. Gossipsub keeps no history to recover it from. See
+[reports/cut-length](reports/cut-length/README.md).
+
+A border that is only bad, not cut: at 10% loss and 300 ms each way, nothing changed. At 30%
+loss the mesh lost peers whatever the kernel setting, and lowering `tcp_retries2` to 8 turned
+a one-time loss into a steady drain, so the advice to lower it needs a condition. See
+[reports/lossy-border](reports/lossy-border/README.md).
+
 A second scenario asks how few open nodes are enough. In its one valid run a single node in
 fifty carried all cross-border traffic; four runs were withdrawn because reopening the
 border loaded the host past the validity limits. See
