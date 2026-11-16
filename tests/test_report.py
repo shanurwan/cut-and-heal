@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import json
 
-from cutandheal.report import write_report
+from cutandheal.evidence import load_run
+from cutandheal.report import held_messages, write_report
 
 from .synth import write_run
 
@@ -135,4 +136,14 @@ def test_report_follows_messages_held_through_a_shutdown(tmp_path, scn, topo) ->
     assert out["phase"] == "cut" and out["closed_s"] == 60 and out["ratio"] == 1.0
     assert out["first_s"] == out["last_s"] == 30.0
     assert rows[("outside", "inside")]["ratio"] == 0.0 and rows[("outside", "inside")]["last_s"] is None
-    assert "| cut | inside | outside | 60 |" in text and "| 100.00% | 30 | 30 | 30 |" in text
+    assert out["during"] == 0
+    assert "| cut | inside | outside | 60 |" in text and "| 0.00% | 100.00% | 30 | 30 | 30 |" in text
+
+
+def test_report_separates_messages_that_crossed_during_the_cut(tmp_path, scn, topo) -> None:
+    # A cut that leaves existing connections alone: everything crosses at once, cut or not.
+    rows = held_messages(load_run(write_run(tmp_path / "a", scn, topo, lambda *_: 120.0, respect_borders=False)))
+    assert rows
+    for row in rows:
+        assert row["ratio"] == 0.0 and row["first_s"] is None
+        assert row["during_ratio"] == 1.0

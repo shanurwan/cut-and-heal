@@ -314,6 +314,9 @@ def held_messages(run: Run, guard_s: float = 2.0) -> list[dict]:
     when those deliveries came, in seconds after the path reopened. Messages published in the
     first `guard_s` of the phase are left out: they may have crossed before the cut landed.
 
+    Pairs delivered before the reopening are counted apart (`during`). A shaper cut lets none
+    through (rule V4); a cut that only blocks new connections, such as a NetworkPolicy, may.
+
     Gossipsub keeps no store of past messages beyond a few heartbeats, so a message that crosses
     after a reopening was held in a connection that survived the cut.
     """
@@ -331,9 +334,11 @@ def held_messages(run: Run, guard_s: float = 2.0) -> list[dict]:
             # Messages already in flight when the cut landed are not held; skip the first seconds.
             begin = ph.start_ms + guard_s * 1000
             msgs = [m for m in run.messages if m.origin_region == src and begin <= m.sent_ns / 1e6 < ph.end_ms]
-            lags = sorted(
+            all_lags = sorted(
                 (m.received[pod] / 1e6 - ph.end_ms) / 1000 for m in msgs for pod in by_region[dst] if pod in m.received
             )
+            lags = [lag for lag in all_lags if lag >= 0]
+            during = len(all_lags) - len(lags)
             pairs = len(msgs) * len(by_region[dst])
             reacted = moved.get((ph.name, src))
             out.append(
@@ -346,6 +351,8 @@ def held_messages(run: Run, guard_s: float = 2.0) -> list[dict]:
                     "pairs": pairs,
                     "delivered": len(lags),
                     "ratio": len(lags) / pairs if pairs else None,
+                    "during": during,
+                    "during_ratio": during / pairs if pairs else None,
                     "first_s": round(lags[0], 1) if lags else None,
                     "median_s": round(median(lags), 1) if lags else None,
                     "last_s": round(lags[-1], 1) if lags else None,
@@ -738,22 +745,24 @@ def write_report(run_dirs: list[Path], out: Path) -> Path:
             "",
             "Of the messages published in one region while it had no path to another, the share of (message, "
             "node) pairs in the other region delivered by the end of the run, and when, in seconds after the "
-            "path reopened. The last column is when the sending region's mean mesh first moved by more than "
-            "10% during the shutdown, if it did.",
+            "path reopened. *During* is the share that crossed while the border was meant to be shut. The last "
+            "column is when the sending region's mean mesh first moved by more than 10% during the shutdown, if "
+            "it did.",
             "",
-            "| Run | Phase | From | To | Shut (s) | Messages | Delivered later | First (s) | Median (s) | Last (s) "
-            "| Sender's mesh moved after (s) |",
-            "|---|---|---|---|---|---|---|---|---|---|---|",
+            "| Run | Phase | From | To | Shut (s) | Messages | During | Delivered later | First (s) | Median (s) "
+            "| Last (s) | Sender's mesh moved after (s) |",
+            "|---|---|---|---|---|---|---|---|---|---|---|---|",
         ]
         for run_id, rows in held:
             for row in rows:
                 ratio = "n/a" if row["ratio"] is None else f"{row['ratio']:.2%}"
+                during = "n/a" if row.get("during_ratio") is None else f"{row['during_ratio']:.2%}"
                 cells_ = [row[k] for k in ("first_s", "median_s", "last_s")]
                 when = ["" if v is None else f"{v:g}" for v in cells_]
                 moved = "never" if row["src_mesh_moved_after_s"] is None else str(row["src_mesh_moved_after_s"])
                 md.append(
                     f"| {run_id} | {row['phase']} | {row['src']} | {row['dst']} | {row['closed_s']} "
-                    f"| {row['messages']} | {ratio} | {when[0]} | {when[1]} | {when[2]} | {moved} |"
+                    f"| {row['messages']} | {during} | {ratio} | {when[0]} | {when[1]} | {when[2]} | {moved} |"
                 )
     ages = [(r.record.get("run_id"), mesh_drop_ages(r)) for r, *_ in valid]
     if any(rows for _id, rows in ages):

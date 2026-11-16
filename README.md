@@ -78,6 +78,18 @@ loss the mesh lost peers whatever the kernel setting, and lowering `tcp_retries2
 a one-time loss into a steady drain, so the advice to lower it needs a condition. See
 [reports/lossy-border](reports/lossy-border/README.md).
 
+A border shut with NetworkPolicies, the way many lab partition tests are made: on K3s every
+new connection across it was refused, and the existing ones were left alone. For ten minutes
+100% of messages kept crossing at normal latency and the mesh never noticed. A partition
+applied to a running network this way measures an intact one. See
+[reports/policy-cut](reports/policy-cut/README.md).
+
+With each region's machine capped in CPU, the nodes were throttled in up to 76% of scheduler
+periods while the host stayed under half busy, so the rule on host load saw nothing. The
+other rules withdrew every starved run anyway: starvation restarted pods and delayed shapers
+before it moved the median latency. The 99th percentile moved first. 150 nodes averaged under
+2 cores but needed about 3. See [reports/lab-cpu](reports/lab-cpu/README.md).
+
 A second scenario asks how few open nodes are enough. In its one valid run a single node in
 fifty carried all cross-border traffic; four runs were withdrawn because reopening the
 border loaded the host past the validity limits. See
@@ -210,7 +222,9 @@ only the levels derived from it and the query that reproduces them.
 experiment that splits a network into two halves with NetworkPolicies and heals it. This
 project looks at a different part of the problem: outages shaped by real events, graded
 rather than binary, with an asymmetric minority behind the border and a cut that is
-synchronised by clock.
+synchronised by clock. How a cut is made matters: on K3s a policy applied to a running
+network leaves its connections up ([reports/policy-cut](reports/policy-cut/README.md)).
+Whether that affects 10ksim depends on when it applies its policies, which was not tested.
 
 ## Licence
 
