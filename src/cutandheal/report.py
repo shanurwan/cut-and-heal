@@ -7,6 +7,7 @@ to the person who signs the report.
 
 from __future__ import annotations
 
+import csv
 import json
 from dataclasses import asdict
 from pathlib import Path
@@ -352,6 +353,67 @@ def held_messages(run: Run, guard_s: float = 2.0) -> list[dict]:
     return out
 
 
+def _cpu_stat(path: Path) -> dict[str, int]:
+    out = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        key, _, value = line.partition(" ")
+        if value.strip().isdigit():
+            out[key] = int(value)
+    return out
+
+
+def region_cpu(run: Run) -> list[dict]:
+    """CPU of each region's Kubernetes node over the run, from its cgroup, if the workflow
+    recorded it (`lab/<node>.cpu.start` and `.end`, each `wall_ns` plus `cpu.stat`).
+
+    `cores` is the average CPU used. `throttled_share` is the share of scheduler periods in
+    which the node hit its cap: a pod there waited for CPU, whatever the host's load was.
+    """
+    lab = run.path / "lab"
+    out = []
+    for start in sorted(lab.glob("*.cpu.start")) if lab.is_dir() else []:
+        end = start.with_suffix(".end")
+        if not end.exists():
+            continue
+        a, b = _cpu_stat(start), _cpu_stat(end)
+        wall = (b.get("wall_ns", 0) - a.get("wall_ns", 0)) / 1e9
+        periods = b.get("nr_periods", 0) - a.get("nr_periods", 0)
+        out.append(
+            {
+                "node": start.name.removesuffix(".cpu.start"),
+                "seconds": round(wall),
+                "cores": round((b.get("usage_usec", 0) - a.get("usage_usec", 0)) / 1e6 / wall, 3) if wall > 0 else None,
+                "throttled_share": round((b.get("nr_throttled", 0) - a.get("nr_throttled", 0)) / periods, 3)
+                if periods
+                else None,
+                "throttled_s": round((b.get("throttled_usec", 0) - a.get("throttled_usec", 0)) / 1e6, 1),
+            }
+        )
+    return out
+
+
+def policy_timing(run: Run) -> list[dict]:
+    """For a run that shut borders with NetworkPolicies: each request, how long the API took to
+    answer, and its status."""
+    path = run.path / "policies.csv"
+    if not path.exists():
+        return []
+    rows = []
+    with path.open(encoding="utf-8") as f:
+        for r in csv.DictReader(f):
+            rows.append(
+                {
+                    "phase": r["phase"],
+                    "policy": r["policy"],
+                    "action": r["action"],
+                    "late_ms": int(r["sent_ms"]) - int(r["planned_ms"]),
+                    "api_ms": int(r["done_ms"]) - int(r["sent_ms"]),
+                    "status": int(r["status"]),
+                }
+            )
+    return rows
+
+
 def kernel_settings(run: Run) -> dict[str, dict[str, int]]:
     """Each TCP setting the shapers recorded, with the number of pods that had each value."""
     out: dict[str, dict[str, int]] = {}
@@ -449,6 +511,16 @@ def write_report(run_dirs: list[Path], out: Path) -> Path:
         f"- Publish rate {scn.publish.rate_hz:g} msg/s, {scn.publish.size_bytes} bytes, origins alternating "
         "between regions.",
         f"- System under test: `{images.get('node', 'unknown')}`.",
+        *(["- Borders shut by: Kubernetes NetworkPolicy (see `policy.py`)."] if scn.cut == "networkpolicy" else []),
+        *(
+            [
+                "- CPU cap per region node: "
+                + ", ".join(f"`{r}` {c:g} cores" for r, c in sorted(scn.lab.cpus.items()))
+                + "."
+            ]
+            if scn.lab.cpus
+            else []
+        ),
         *(
             ["- Node settings: " + ", ".join(f"`{k}={v}`" for k, v in sorted(scn.node.env.items())) + "."]
             if scn.node.env
@@ -473,6 +545,43 @@ def write_report(run_dirs: list[Path], out: Path) -> Path:
             reasons = "; ".join(f"{v.rule}: {v.detail}" for v in verdicts if not v.passed)
             md.append(f"Run `{run.record.get('run_id')}` is withdrawn and contributes no numbers. {reasons}")
             md.append("")
+    cpu = [(r.record.get("run_id"), region_cpu(r)) for r, *_ in analysed]
+    if any(rows for _id, rows in cpu):
+        md += [
+            "",
+            "## CPU of the region machines",
+            "",
+            "From each region node's cgroup, before and after the run, for every run including withdrawn ones. "
+            "*Throttled* is the share of 100 ms scheduler periods in which the node had used its whole cap.",
+            "",
+            "| Run | Node | Seconds | Cores used | Throttled periods | Seconds throttled |",
+            "|---|---|---|---|---|---|",
+        ]
+        for run_id, rows in cpu:
+            for row in rows:
+                share = "n/a" if row["throttled_share"] is None else f"{row['throttled_share']:.1%}"
+                md.append(
+                    f"| {run_id} | {row['node']} | {row['seconds']} | {row['cores']} | {share} | {row['throttled_s']} |"
+                )
+    policies = [(r.record.get("run_id"), policy_timing(r)) for r, *_ in analysed]
+    if any(rows for _id, rows in policies):
+        md += [
+            "",
+            "## NetworkPolicy requests",
+            "",
+            "Each policy the controller created or deleted: how late after the phase began it asked, how long "
+            "the API server took to answer, and the HTTP status. When the network plugin enforced it is read "
+            "from the deliveries, not from here.",
+            "",
+            "| Run | Phase | Policy | Action | Asked after (ms) | API answered in (ms) | Status |",
+            "|---|---|---|---|---|---|---|",
+        ]
+        for run_id, rows in policies:
+            for row in rows:
+                md.append(
+                    f"| {run_id} | {row['phase']} | {row['policy']} | {row['action']} | {row['late_ms']} "
+                    f"| {row['api_ms']} | {row['status']} |"
+                )
     if not valid:
         md.append("No run passed every validity rule, so this report has no results.")
         (out / "report.md").write_text("\n".join(md) + "\n", encoding="utf-8")
@@ -697,6 +806,7 @@ def write_report(run_dirs: list[Path], out: Path) -> Path:
                     "transitions": [asdict(t) for t in trs], "kernel": kernel_settings(r),
                     "mesh_drop_ages": mesh_drop_ages(r), "stream_timeouts": stream_timeouts(r),
                     "timeout_bursts": timeout_bursts(r), "held_messages": held_messages(r),
+                    "region_cpu": region_cpu(r), "policies": policy_timing(r),
                 }
                 for r, cs, trs, vs, ok in analysed
             ],

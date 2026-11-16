@@ -51,7 +51,8 @@ jobs:
       - name: Create a cluster with one node per region
         run: |
           regions="$(python -c "import sys; from cutandheal.model import load_scenario; print(' '.join(load_scenario(sys.argv[1]).regions))" "scenarios/${{ inputs.scenario }}.yaml")"
-          cluster/up.sh $regions
+          cpus="$(python -c "import sys; from cutandheal.model import load_scenario; print(' '.join(f'{r}={c:g}' for r, c in load_scenario(sys.argv[1]).lab.cpus.items()))" "scenarios/${{ inputs.scenario }}.yaml")"
+          CAH_REGION_CPUS="$cpus" cluster/up.sh $regions
           echo "KUBECONFIG=$PWD/.kube/kubeconfig.yaml" >> "$GITHUB_ENV"
           { nproc; free -g | sed -n 2p; uname -r; } | tr '\n' ' '
       - run: cluster/load-image.sh cut-and-heal:replay
@@ -59,10 +60,17 @@ jobs:
         run: |
           image="$(python -c "import sys; from cutandheal.model import load_scenario; print(load_scenario(sys.argv[1]).node.image or '')" "scenarios/${{ inputs.scenario }}.yaml")"
           if [ -n "$image" ]; then cluster/build-node.sh "$image"; fi
+      - name: Record the region nodes' CPU before the run
+        run: cluster/cpu-stat.sh start "$RUNNER_TEMP/lab"
       - name: Run
         run: >-
           cah run "scenarios/${{ inputs.scenario }}.yaml" --run-id "$RUN_ID" --seed "${{ matrix.seed }}"
           --controller-image cut-and-heal:replay --keep
+      - name: Record the region nodes' CPU after the run
+        if: always()
+        run: |
+          cluster/cpu-stat.sh end "$RUNNER_TEMP/lab"
+          if [ -d "runs/$RUN_ID" ]; then cp -r "$RUNNER_TEMP/lab" "runs/$RUN_ID/lab"; fi
       - name: Judge
         if: always()
         run: cah analyze "runs/$RUN_ID" --show-invalid || true

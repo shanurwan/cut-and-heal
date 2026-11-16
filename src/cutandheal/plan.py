@@ -125,6 +125,9 @@ class BorderView:
 def border_view(scn: Scenario, topo: Topology, pod: Pod, border_id: str, phase_idx: int, seed: int) -> BorderView:
     border = scn.borders[border_id]
     link = scn.link(scn.timeline[phase_idx], border_id)
+    if scn.cut == "networkpolicy":
+        # The controller shuts the border with policies; the shaper only shapes the link.
+        return BorderView(egress=link, drop_ingress=False)
     if pod.region == border.gated and pod.name not in open_set(scn, topo, border_id, phase_idx, seed):
         return BorderView(egress=BLOCKED, drop_ingress=True)
     return BorderView(egress=link, drop_ingress=False)

@@ -1,4 +1,4 @@
-"""The four Kubernetes API calls the controller needs, over the pod's service account.
+"""The few Kubernetes API calls the controller needs, over the pod's service account.
 
 A full client library would be a larger dependency than the code that uses it.
 """
@@ -54,6 +54,26 @@ class Kube:
         )
         resp.raise_for_status()
         return resp
+
+    async def _send(self, method: str, path: str, body: dict | None = None) -> int:
+        async with self._s.request(
+            method,
+            self._base + path,
+            json=body,
+            headers={"Authorization": f"Bearer {self._token}"},
+            timeout=aiohttp.ClientTimeout(total=30),
+        ) as resp:
+            await resp.read()
+            return resp.status
+
+    async def create_network_policy(self, body: dict) -> int:
+        """Create a NetworkPolicy in the run's namespace; returns the HTTP status."""
+        return await self._send("POST", f"/apis/networking.k8s.io/v1/namespaces/{self.namespace}/networkpolicies", body)
+
+    async def delete_network_policy(self, name: str) -> int:
+        return await self._send(
+            "DELETE", f"/apis/networking.k8s.io/v1/namespaces/{self.namespace}/networkpolicies/{name}"
+        )
 
     async def region_cidrs(self) -> dict[str, tuple[str, ...]]:
         """Pod CIDRs per region, from the nodes labelled into each region."""

@@ -1,0 +1,34 @@
+# One arm of the question in docs/METHOD.md section 18: what does a shorter TCP timeout
+# cost on a border that is slow and lossy but never cut?
+# For fifteen minutes the border adds 300 ms each way and loses 30% of packets each way;
+# kernel defaults for TCP.
+name: lossy-30
+title: A fifteen-minute 30% lossy border
+
+regions:
+  ir:
+    nodes: 50
+    domestic: {delay_ms: 20, jitter_ms: 4, rate_mbit: 50}
+  world:
+    nodes: 100
+    domestic: {delay_ms: 50, jitter_ms: 10, rate_mbit: 50}
+
+borders:
+  ir-world:
+    between: [ir, world]
+    gated: ir
+    healthy: {delay_ms: 100, jitter_ms: 20, loss_pct: 0.5, rate_mbit: 20}
+
+bootstrap_region: world
+
+publish:
+  rate_hz: 1
+  size_bytes: 1000
+
+timeline:
+  - {name: baseline, duration_s: 240}
+  - name: lossy
+    duration_s: 900
+    borders:
+      ir-world: {link: {delay_ms: 300, jitter_ms: 30, loss_pct: 30, rate_mbit: 5}}
+  - {name: restored, duration_s: 300}

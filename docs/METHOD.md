@@ -460,3 +460,155 @@ lasts after the dead peers are dropped, is read from it without a prediction.
 and nothing here models a slow or lossy border; every open node has the healthy link. Mobile
 and fixed users who are the same people, or move between networks. More than two days.
 
+## 16. Lab question: how much CPU can be taken away before the measurement changes?
+
+Written on 2026-11-16, before any scenario below was run.
+
+A lab that packs more pods onto each machine runs bigger experiments on the same hardware,
+until the pods wait for CPU and the waiting shows up as latency that the protocol did not
+cause. Rule V6 guards against this by watching the host's load. It cannot see a node that
+has its own CPU limit, which is how capacity is shared in most clusters: such a node can be
+starved while the host is idle.
+
+In earlier runs the whole 4-CPU host was 26% busy at the median and 43% at the 95th
+percentile, Kubernetes and the metrics store included. The median delivery from inside to
+inside in the baseline was 28 to 33 ms.
+
+**Change to the tool.** A scenario may cap the CPU of each region's Kubernetes node
+(`lab.cpus`), which `cluster/up.sh` applies to the node's container. Everything on that node
+shares the cap: the gossipsub nodes, their shapers, and the node's own kubelet and network
+agents. The workflow records each region node's cgroup CPU counters before and after the run,
+and the report gives the cores used and the share of scheduler periods in which the node was
+throttled.
+
+**Design.** Four arms that differ only in the cap: `lab-cpu-uncapped`, and `lab-cpu-1000`,
+`-500` and `-250`, the millicores shared by both region nodes, a third to `ir` and two thirds
+to `world`. A 360 s baseline, a 240 s shutdown and 240 s after it. Three seeds each. Validity
+rules and limits are unchanged.
+
+| # | Prediction | Refuted if |
+|---|---|---|
+| P27 | Every run of every arm passes V6. | Any run fails V6. |
+| P28 | With 250 millicores, the median delivery from inside to inside in the baseline's steady state is at least twice that of the uncapped arm, averaged over valid runs of each. | It is less than twice, or no run with 250 is valid. |
+| P29 | At least one capped arm has a run that passes all seven rules with that median at least 50% above the uncapped arm's mean. | No such run. |
+| P30 | With 250 millicores, each region node is throttled in at least 20% of scheduler periods. | Below 20% for any region node in any run. |
+
+**Reading the outcomes.**
+
+- P27 to P30 hold: the validity rules pass runs whose latency is set by CPU starvation, not
+  by the network. The fix is a rule on throttling, which this tool would then add as V8, and
+  a capacity figure for the lab: the highest number of nodes per core at which the arm's
+  latency matches the uncapped one.
+- P28 fails: 150 nodes need less CPU than expected, and the capacity figure is at least
+  600 nodes per core for this workload.
+- P29 fails while P28 holds: the existing rules, most likely V2 through late shapers, already
+  withdraw starved runs. The rules are sufficient and the capacity figure still stands.
+
+**What it cannot show.** Memory pressure, disk or network limits of the host. A heavier
+workload than one 1000-byte message a second. The DST lab's machines, which have more cores
+and a different network plugin.
+
+## 17. Lab question: does a NetworkPolicy partition a running mesh?
+
+Written on 2026-11-16, before the scenario below was run.
+
+A partition test in a Kubernetes lab is often made with NetworkPolicies: label the two sides
+and allow each to talk only to itself. That is how 10ksim's partition experiment works. Every
+cut in this project so far was made with netem, which drops every packet of the closed border
+at a set time. A policy is different in two ways. It is enforced by the cluster's network
+plugin when the plugin gets to it, not at a set time. And many plugins let packets of a
+connection that already exists through before they look at policy, so that a policy blocks
+new connections and leaves existing ones alone. Gossipsub's mesh is made of connections that
+already exist.
+
+**Change to the tool.** A scenario may shut its borders with policies (`cut: networkpolicy`).
+The controller creates one policy per side when a shut phase begins and deletes them when it
+ends, and records when it asked and when the API answered. Links keep their netem profile;
+nothing is dropped by the shapers. Only whole cuts can be made this way.
+
+For this scenario V4 is a measurement, not a validity rule: whether traffic crosses a policy
+is the question. The report states what crossed and the run is not withdrawn for it.
+
+**Design.** `policy-cut`: the regions and links of `long-cut`, the border shut for 600 s by
+policies, three seeds. The test cluster is K3s, whose policies are enforced by its built-in
+controller (kube-router), with flannel. The DST lab uses Cilium and Kube-OVN; nothing here is
+measured on them.
+
+| # | Prediction | Refuted if |
+|---|---|---|
+| P31 | The API server accepts every policy (HTTP 201 on create, 200 on delete) within 1 s of the phase starting. | Any request fails or answers later. |
+| P32 | Messages keep crossing on the connections that existed before the policy: in the shut phase's steady state at least 90% of pairs across the border are delivered within 10 s, in both directions, in every run. | Below 90% in either direction in any run. |
+
+**Reading the outcomes.**
+
+- P31 and P32 hold: on this cluster a NetworkPolicy does not partition a running gossipsub
+  mesh; it only stops new connections. A partition experiment built on policies would then
+  measure an intact mesh unless it also ends the existing connections.
+- P32 fails: the policy does stop existing connections. When the inside mesh first moves then
+  tells how: within about 30 s if connections are reset, or 480 to 600 s, as with netem, if
+  packets are silently dropped or refused with an ICMP error, which TCP ignores on an open
+  connection.
+
+**What it cannot show.** Cilium or Kube-OVN, which the DST lab runs, or how they are
+configured there. Whether 10ksim's own partition, which applies its policies before or after
+the mesh forms, is affected: that depends on when it applies them, which is not tested here.
+
+## 18. Follow-up question: what does a shorter TCP timeout cost on a link that is only bad?
+
+Written on 2026-11-16, before any scenario below was run.
+
+The long-cut report says that lowering `tcp_retries2` to 8 or less makes a node notice a cut
+within two minutes. It also says that this was never tried on a border that is slow and
+lossy but still up, where the same setting may close connections that would have recovered.
+The fixed lines that stayed up in Iran in 2022 were of that kind.
+
+With independent loss `p` in each direction, a retransmission fails if either the segment
+or its acknowledgement is lost, with probability `1 - (1 - p)^2`: 0.19 at 10%, 0.51 at 30%.
+With 300 ms added each way the retransmission timeout starts near a second, so the kernel
+gives up after about 7 consecutive failures at `tcp_retries2 = 8` and about 14 at the default
+of 15. At 30% loss, 0.51^7 is about 1 in 110 and 0.51^14 about 1 in 12,000: every
+connection meets hundreds of losses in fifteen minutes, so the shorter setting should close
+many connections and the default very few. At 10% loss neither should close any.
+
+**Design.** Four arms: `lossy-10`, `lossy-10-retries-8`, `lossy-30`, `lossy-30-retries-8`.
+The regions and links of `long-cut`; for 900 s the border adds 300 ms each way (30 ms
+jitter), loses 10% or 30% of packets each way and is limited to 5 Mbit/s; then it returns to
+its healthy profile. The default kernel or `tcp_retries2 = 8`. Three seeds each.
+
+| # | Prediction | Refuted if |
+|---|---|---|
+| P33 | With 10% loss, under either setting, the inside mean mesh does not move by more than 10% during the lossy phase, and at least 99% of pairs across the border in its steady state are delivered within 10 s. | Either fails in any valid run. |
+| P34 | With 30% loss and `tcp_retries2 = 8`, the inside mean mesh moves by more than 10% during the lossy phase in every valid run. | It does not in any valid run. |
+| P35 | With 30% loss and the default, it does not move by more than 10% in any valid run. | It does in any valid run. |
+
+**Reading the outcomes.**
+
+- P33 to P35 hold: the shorter timeout is free on a moderately bad link and costly on a very
+  bad one, so the long-cut report's advice must name the loss it holds for.
+- P34 fails: the shorter timeout closes too few connections to move the mesh even at 30%
+  loss, and the advice stands without a condition at these levels.
+- P35 fails: even the default closes connections on such a link, and the comparison between
+  the two settings is read from how far and how often the mesh moved.
+
+**What it cannot show.** Loss that comes in bursts, as on a congested or radio link; netem's
+loss here is independent per packet. Any other delay or rate.
+
+## 19. Not run: nodes of different implementations in one network
+
+The DST roadmap lists interop at scale for this quarter. The test-node repository has go and
+rust nodes beside the nim one, and a cut with mixed implementations would show whether the
+others take as long as nim-libp2p to drop a dead peer. It was not run, because at commit
+`fb8691e` the go node cannot join the same network as the regression node, and its output
+cannot be read by this tool:
+
+- **Peer identities.** The go node derives the peer ID it expects to dial from the peer's
+  host name (`go-test-node/main.go`); the regression node generates a random key and is
+  found through Kademlia from a bootstrap node. A go node would refuse the handshake.
+- **Discovery.** The go node dials a number of addresses resolved from a Service name
+  (`SERVICE`, `CONNECTTO`); the regression node expects the `bootstrap` service and Kademlia.
+- **Receipts.** The go node logs `<sent> milliseconds: <delay>` for each message, without a
+  message ID, so deliveries cannot be matched to messages across nodes.
+
+Each is a change to the go node, not to the network or to this tool. The rust node was not
+examined.
+

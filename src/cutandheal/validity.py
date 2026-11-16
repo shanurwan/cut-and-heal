@@ -116,6 +116,11 @@ def _v4_no_leak(run: Run, lim: Limits) -> Verdict:
     detail = f"{len(closed_windows)} phases with a closed border, {checked} receives inside them, " + (
         "none across a closed border" if not leaks else "; ".join(f"{k}: {n} received" for k, n in leaks.items())
     )
+    if run.scenario.cut == "networkpolicy":
+        # Whether a policy stops traffic is what such a scenario asks, so a leak is its result,
+        # reported here, and not a fault of the run (docs/METHOD.md section 17).
+        return Verdict("V4", "No message was received across a border while it had no open node", True,
+                       "measured, not judged, for a networkpolicy cut: " + detail)  # fmt: skip
     return Verdict("V4", "No message was received across a border while it had no open node", not leaks, detail)
 
 

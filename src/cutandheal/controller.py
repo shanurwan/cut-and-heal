@@ -33,6 +33,7 @@ from . import __version__
 from .kube import Kube, PodInfo
 from .model import Scenario, load_scenario
 from .plan import Pod, Topology, check_topology, open_order, pod_plan, setup_commands
+from .policy import desired_policies
 
 log = logging.getLogger("cah.controller")
 
@@ -269,6 +270,30 @@ async def publisher(
         await asyncio.gather(*tasks)
 
 
+async def policy_scheduler(kube: Kube, scn: Scenario, t0_ms: int, out: list[dict]) -> None:
+    """Shut and reopen borders with NetworkPolicies at the start of each phase, recording when
+    each request was made and when the API server answered. The policy takes effect later,
+    when the network plugin has processed it; the evidence shows when."""
+    current: dict[str, dict] = {}
+    for idx, (name, start_s, _end) in enumerate(scn.phase_windows()):
+        planned = t0_ms + start_s * 1000
+        delay = (planned - now_ms()) / 1000
+        if delay > 0:
+            await asyncio.sleep(delay)
+        want = desired_policies(scn, idx)
+        for pname in sorted(set(want) - set(current)):
+            sent = now_ms()
+            status = await kube.create_network_policy(want[pname])
+            out.append({"phase": name, "policy": pname, "action": "create", "planned_ms": planned,
+                        "sent_ms": sent, "done_ms": now_ms(), "status": status})  # fmt: skip
+        for pname in sorted(set(current) - set(want)):
+            sent = now_ms()
+            status = await kube.delete_network_policy(pname)
+            out.append({"phase": name, "policy": pname, "action": "delete", "planned_ms": planned,
+                        "sent_ms": sent, "done_ms": now_ms(), "status": status})  # fmt: skip
+        current = want
+
+
 async def load_sampler(out: list[dict], stop: asyncio.Event, period_s: float = 5.0) -> None:
     """Host CPU and load. A saturated host stretches every latency; the run must show it was not."""
 
@@ -364,6 +389,7 @@ async def run(cfg: Config) -> None:
         "failure": "",
     }
     publishes: list[dict] = []
+    policies: list[dict] = []
     load: list[dict] = []
     stop = asyncio.Event()
     sampler = None
@@ -395,7 +421,12 @@ async def run(cfg: Config) -> None:
         sampler = asyncio.create_task(load_sampler(load, stop))
         log.info("T0 in %ds; timeline %ds; %d nodes", cfg.lead_s, scn.duration_s, len(topo.pods))
 
+        cutter = None
+        if scn.cut == "networkpolicy":
+            cutter = asyncio.create_task(policy_scheduler(kube, scn, t0_ms, policies))
         await publisher(session, scn, publish_order(scn, topo, cfg.seed), t0_ms, publishes)
+        if cutter:
+            await cutter
         end_ms = t0_ms + scn.duration_s * 1000
         await asyncio.sleep(max(0.0, (end_ms - now_ms()) / 1000) + cfg.drain_s)
         record["end_ms"] = end_ms
@@ -417,6 +448,8 @@ async def run(cfg: Config) -> None:
             )
         write_csv(cfg.results / "publishes.csv", sorted(publishes, key=lambda r: r["seq"]))
         write_csv(cfg.results / "acks.csv", state.acks)
+        if scn.cut == "networkpolicy":
+            write_csv(cfg.results / "policies.csv", policies)
         write_csv(cfg.results / "load.csv", load)
         (cfg.results / "run.json").write_text(json.dumps(record, indent=1))
         (cfg.results / "DONE").write_text(record["status"] + "\n")

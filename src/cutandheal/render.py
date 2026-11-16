@@ -184,7 +184,21 @@ def _controller(scn: Scenario, opt: RenderOptions, scenario_yaml: str) -> list[d
             "apiVersion": "rbac.authorization.k8s.io/v1",
             "kind": "Role",
             "metadata": _meta("controller", ns),
-            "rules": [{"apiGroups": [""], "resources": ["pods", "pods/log"], "verbs": ["get", "list"]}],
+            "rules": [
+                {"apiGroups": [""], "resources": ["pods", "pods/log"], "verbs": ["get", "list"]},
+                # Only a scenario that shuts borders with policies may write, and only policies.
+                *(
+                    [
+                        {
+                            "apiGroups": ["networking.k8s.io"],
+                            "resources": ["networkpolicies"],
+                            "verbs": ["create", "delete"],
+                        }
+                    ]
+                    if scn.cut == "networkpolicy"
+                    else []
+                ),
+            ],
         },
         {
             "apiVersion": "rbac.authorization.k8s.io/v1",

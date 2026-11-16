@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -158,6 +158,24 @@ class Node(_Model):
         return self
 
 
+class Lab(_Model):
+    """The machines a scenario runs on, for experiments about the lab rather than the protocol.
+
+    `cpus` caps the CPU of each region's Kubernetes node, in cores, through `cluster/up.sh`.
+    Every pod on that node, and the node's own kubelet and network agents, share the cap.
+    Regions left out are not capped.
+    """
+
+    cpus: dict[Name, float] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _check(self) -> Lab:
+        for region, cpus in self.cpus.items():
+            if cpus <= 0:
+                raise ValueError(f"lab cpus for {region!r} must be positive, not {cpus}")
+        return self
+
+
 class Scenario(_Model):
     name: Name
     title: str
@@ -171,6 +189,11 @@ class Scenario(_Model):
     governs a behaviour. Empty means the kernel defaults, which is what every report
     before `long-cut` used."""
     node: Node = Node()
+    lab: Lab = Lab()
+    cut: Literal["netem", "networkpolicy"] = "netem"
+    """How a shut border is made. `netem`: every pod drops border traffic at a set time.
+    `networkpolicy`: the controller applies Kubernetes NetworkPolicies when the phase begins;
+    links keep their netem profile. See `policy.py`."""
     timeline: tuple[Phase, ...] = Field(min_length=2)
 
     @model_validator(mode="after")
@@ -187,6 +210,18 @@ class Scenario(_Model):
                     f"sysctl {key!r} is not allowed: only net.ipv4.tcp_* can be set, and only "
                     "inside a node's own network namespace"
                 )
+        for region in self.lab.cpus:
+            if region not in self.regions:
+                raise ValueError(f"lab cpus name unknown region {region!r}")
+        if self.cut == "networkpolicy":
+            for phase in self.timeline:
+                for bid, border in self.borders.items():
+                    n = self.regions[border.gated].nodes
+                    if (state := phase.borders.get(bid)) is not None and state.resolve_open(n) not in (0, n):
+                        raise ValueError(
+                            f"phase {phase.name!r} opens part of border {bid!r}; a networkpolicy cut "
+                            "can only shut a border for every pod or none"
+                        )
         names = [p.name for p in self.timeline]
         if len(set(names)) != len(names):
             raise ValueError("phase names must be unique; analysis keys results by phase name")

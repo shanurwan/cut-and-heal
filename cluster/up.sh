@@ -14,6 +14,9 @@ MAX_PODS="${CAH_MAX_PODS:-400}"
 API_PORT="${CAH_API_PORT:-6550}"
 OUT="${CAH_KUBE_DIR:-$PWD/.kube}"
 REGIONS=("$@")
+# Optional CPU cap per region node, in cores: CAH_REGION_CPUS="ir=0.5 world=1".
+declare -A CPUS=()
+for pair in ${CAH_REGION_CPUS:-}; do CPUS["${pair%%=*}"]="${pair#*=}"; done
 [ "${#REGIONS[@]}" -ge 2 ] || { echo "usage: $0 <region> <region> [...]" >&2; exit 2; }
 
 # A /23 per node holds 510 pods; the default /24 caps a region at 254 whatever max-pods says.
@@ -48,6 +51,8 @@ run_node "$NAME-control" server \
 
 EXTRA_DOCKER=(-e K3S_URL="https://$NAME-control:6443")
 for region in "${REGIONS[@]}"; do
+  EXTRA_DOCKER=(-e K3S_URL="https://$NAME-control:6443")
+  [ -n "${CPUS[$region]:-}" ] && EXTRA_DOCKER+=(--cpus "${CPUS[$region]}")
   run_node "$NAME-$region" agent --node-label="cut-and-heal/region=$region" "${COMMON[@]}"
 done
 

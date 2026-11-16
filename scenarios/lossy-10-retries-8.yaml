@@ -1,0 +1,37 @@
+# One arm of the question in docs/METHOD.md section 18: what does a shorter TCP timeout
+# cost on a border that is slow and lossy but never cut?
+# For fifteen minutes the border adds 300 ms each way and loses 10% of packets each way;
+# every node gives up on an unanswered TCP connection after 8 retransmissions.
+name: lossy-10-retries-8
+title: A fifteen-minute 10% lossy border, giving up after 8 retransmissions
+
+regions:
+  ir:
+    nodes: 50
+    domestic: {delay_ms: 20, jitter_ms: 4, rate_mbit: 50}
+  world:
+    nodes: 100
+    domestic: {delay_ms: 50, jitter_ms: 10, rate_mbit: 50}
+
+borders:
+  ir-world:
+    between: [ir, world]
+    gated: ir
+    healthy: {delay_ms: 100, jitter_ms: 20, loss_pct: 0.5, rate_mbit: 20}
+
+bootstrap_region: world
+
+publish:
+  rate_hz: 1
+  size_bytes: 1000
+
+sysctls:
+  net.ipv4.tcp_retries2: "8"
+
+timeline:
+  - {name: baseline, duration_s: 240}
+  - name: lossy
+    duration_s: 900
+    borders:
+      ir-world: {link: {delay_ms: 300, jitter_ms: 30, loss_pct: 10, rate_mbit: 5}}
+  - {name: restored, duration_s: 300}
