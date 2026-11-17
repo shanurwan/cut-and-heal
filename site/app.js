@@ -164,9 +164,11 @@ function buildModel(data, run) {
     if (!openIn[k].has(pod) && !openIn[k - 1].has(pod)) prunedAt[k][pod] = Math.min(prunedAt[k][pod], prunedAt[k - 1][pod]);
   }
   // 0 live, 1 stale (still counted, unreachable), 2 dialling (open, nothing crossing yet), 3 gone
+  // A NetworkPolicy cut blocks new connections only: the links that existed stay in use.
+  const policy = data.cut === "networkpolicy";
   const crossState = (pod, t) => {
     const k = effPhase(pod, t);
-    if (openIn[k].has(pod)) return t < dialUntil[k] ? 2 : 0;
+    if (openIn[k].has(pod) || policy) return openIn[k].has(pod) && t < dialUntil[k] ? 2 : 0;
     return t < prunedAt[k][pod] ? 1 : 3;
   };
 
@@ -201,7 +203,7 @@ function buildModel(data, run) {
   return {
     pods, n, gated, other, gatedPods, phases, total, openCount, pos, grid, adj, links, end, borderId, border,
     openIn, lateS, phaseAt, effPhase, isOpen, dialUntil, crossState, prunedAt, meshOf, meanMesh, bytesOf,
-    pairs, SB, nb, windowRatio, steady, msg, firstShut, reopen,
+    pairs, SB, nb, windowRatio, steady, msg, firstShut, reopen, policy,
   };
 }
 
@@ -367,7 +369,7 @@ function spread(m, origin, crossAllowed, t) {
       if (depth[b] >= 0) continue;
       if (m.pods[a].region !== m.pods[b].region) {
         const g = m.pods[a].region === m.gated ? a : b;
-        if (!crossAllowed || !m.isOpen(g, t)) continue;
+        if (!crossAllowed || (!m.policy && !m.isOpen(g, t))) continue;
       }
       depth[b] = depth[a] + 1; parent[b] = a; queue.push(b); order.push(b);
     }
@@ -567,7 +569,9 @@ function hud(now) {
 
   let note = "";
   const since = Math.floor(t - ph.start_s);
-  if (k > 0 && m.openCount[k] === 0) {
+  if (k > 0 && m.openCount[k] === 0 && m.policy) {
+    note = `Policies in place for ${since} s. New connections are refused; the existing ones still carry messages across.`;
+  } else if (k > 0 && m.openCount[k] === 0) {
     note = `Border shut ${since} s ago. Inside pods still report a mesh of ${m.meanMesh(m.gated, t)?.toFixed(1)} peers.`;
   } else if (k > 0 && t < m.dialUntil[k]) {
     note = `${m.openCount[k]} of ${m.total} reopened ${since} s ago. Nothing has crossed yet.`;
@@ -638,21 +642,39 @@ function buildPanels() {
   const num = (x) => `<span class="num">${x}</span>`;
   const go = (t, speed, cam) => ({ t, speed, cam });
 
+  const shutFor = cut >= 0 ? m.phases[cut].end_s - m.phases[cut].start_s : 0;
   const how = [
-    ["An outage becomes a timeline", `A public traffic signal for the real event is cut into levels. Each level becomes a phase: how many inside nodes still have a border. That is the bar at the bottom: ${num(m.phases.length)} phases, replayed in ${num(mmss(m.end))}.`, go(0, 30, "overview")],
+    S.data.source ? null : ["One controlled change", `No real outage behind this one. The border shuts for ${num(shutFor)} s and opens again, and everything else is held fixed, to answer one question. The bar at the bottom shows the ${num(m.phases.length)} phases.`, go(0, 30, "overview")],
+    S.data.source ? ["An outage becomes a timeline", `A public traffic signal for the real event is cut into levels. Each level becomes a phase: how many inside nodes still have a border. That is the bar at the bottom: ${num(m.phases.length)} phases, replayed in ${num(mmss(m.end))}.`, go(0, 30, "overview")] : null,
     ["Regions are Kubernetes nodes", `Each district is one cluster node with its own pod address range. Each building is a pod running the gossipsub node under test, ${num(m.n)} in all. Height is how many bytes it is sending.`, go(20, 10, "inside")],
-    ["Every pod carries its own border", `There is no central firewall. A sidecar in each pod sorts traffic by destination range with <code>tc</code>: same region, across the border, or dropped. So the wall is ${num(m.total)} bricks, one per inside pod. Click a building to see its rules.`, go(cut >= 0 ? m.phases[cut].start_s + 12 : 0, 1, "wall")],
-    ["The cut lands on the clock", cut >= 0 ? `Every shaper holds the whole timeline and acts at an absolute time. In this run the ${num(m.total)} bricks went up between ${num(Math.round(Math.min(...late)))} and ${num(Math.round(Math.max(...late)))} ms after the scheduled instant. Watch it at a tenth of real speed.` : "This scenario has no full cut.", go(cut >= 0 ? m.phases[cut].start_s - 0.25 : 0, 0.1, "wall")],
+    m.policy ? ["The cut is a NetworkPolicy", `Here the shapers keep every link healthy and drop nothing. When the phase begins the controller creates one policy per side that allows traffic only within that side; in this run the API server accepted them ${num(Math.max(...(run.policies || []).filter((x) => x.action === "create").map((x) => x.late_ms + x.api_ms)))} ms after the phase began. The wall shows where the policy applies.`, go(cut >= 0 ? m.phases[cut].start_s - 2 : 0, 1, "wall")] : null,
+    m.policy ? null : ["Every pod carries its own border", `There is no central firewall. A sidecar in each pod sorts traffic by destination range with <code>tc</code>: same region, across the border, or dropped. So the wall is ${num(m.total)} bricks, one per inside pod. Click a building to see its rules.`, go(cut >= 0 ? m.phases[cut].start_s + 12 : 0, 1, "wall")],
+    m.policy ? null : ["The cut lands on the clock", cut >= 0 ? `Every shaper holds the whole timeline and acts at an absolute time. In this run the ${num(m.total)} bricks went up between ${num(Math.round(Math.min(...late)))} and ${num(Math.round(Math.max(...late)))} ms after the scheduled instant. Watch it at a tenth of real speed.` : "This scenario has no full cut.", go(cut >= 0 ? m.phases[cut].start_s - 0.25 : 0, 0.1, "wall")],
     ["One publisher, one clock", `Once a second the controller asks one pod to publish. Every flash is a pod that logged receiving that message; a red spark is a copy that reached a shut border.`, go(cut >= 0 ? m.phases[cut].start_s + 40 : 30, 1, "overview")],
     ["Evidence first, then a verdict", `The run only collects logs. Seven validity rules judge them afterwards, and a run that breaks one is withdrawn. ${withdrawn.length ? `Here ${withdrawn.map((r) => `seed ${r.seed} was withdrawn under ${r.failed.map((f) => f.rule).join(", ")}`).join("; ")}.` : "No run of this scenario was withdrawn."} Shapers in this run were at most ${num(Math.round(Math.max(...lateAll)))} ms late against a limit of 500.`, go(S.t, S.speed, "overview")],
-  ];
+  ].filter(Boolean);
   const found = [];
   if (cut >= 0) {
     found.push(["Inside, nothing is lost", `Through the shutdown, inside-to-inside delivery was ${num(pct(inside?.ratio))} at a median of ${num(Math.round(inside?.p50_ms ?? 0))} ms.`, go(m.phases[cut].start_s - 6, 10, "inside")]);
     if (noticed != null) found.push(["The mesh notices late", `Inside pods kept counting unreachable peers. Half of them had changed mesh size ${num(Math.round(noticed - m.phases[cut].start_s))} s after the cut (${S.data.step_s} s resolution). Red links are peers still counted.`, go(noticed - 25, 10, "overview")]);
   }
-  if (re >= 0) {
-    found.push([`${m.openCount[re]} of ${m.total} reopen, and nothing crosses`, `For ${num(gap)} s after the border reopened on ${m.openCount[re]} pods, no message crossed in either direction.`, go(m.phases[re].start_s - 4, 10, "wall")]);
+  const held = (src, dst) => (run.held || []).find((h) => h.src === src && h.dst === dst);
+  if (m.policy && cut >= 0) {
+    const across = m.steady(m.phases[cut].name, m.gated, m.other), back = m.steady(m.phases[cut].name, m.other, m.gated);
+    found.push(["Shut, and everything crosses", `With the policies in place, ${num(pct(across?.ratio))} of messages from inside reached the outside at a median of ${num(Math.round(across?.p50_ms ?? 0))} ms, and ${num(pct(back?.ratio))} the other way. The connections that existed before the cut kept carrying them.`, go(m.phases[cut].start_s + 60, 1, "wall")]);
+    const pr = (run.probes || []).filter((x) => x.phase === m.phases[cut].name);
+    if (pr.length) {
+      const tried = pr.reduce((a, x) => a + x.tried, 0), ok = pr.reduce((a, x) => a + x.connected, 0);
+      found.push(["New connections are refused", `Every 10 s a pod on each side opened a fresh TCP connection across the border. While shut, ${num(ok)} of ${num(tried)} connected. The policy was enforced, for new connections only.`, go(m.phases[cut].start_s + 120, 10, "overview")]);
+    }
+  }
+  const out = cut >= 0 && !m.policy ? held(m.gated, m.other) : null, inn = cut >= 0 && !m.policy ? held(m.other, m.gated) : null;
+  if (out && re >= 0) {
+    const lost = out.ratio < 0.5;
+    found.push([lost ? "What was sent during the cut is lost" : "What was sent during the cut arrives late", `Of messages published inside during the ${num(out.closed_s)} s cut, ${num(pct(out.ratio))} reached the outside after the border reopened${out.last_s != null ? `, the last ${num(Math.round(out.last_s))} s after` : ""}; the other way, ${num(pct(inn?.ratio))}. ${lost ? "The idle check had closed the connections that held them." : "They waited in connections that survived the cut."}`, go(m.phases[re].start_s - 4, 10, "overview")]);
+  }
+  if (re >= 0 && !m.policy) {
+    if (gap >= 10) found.push([`${m.openCount[re]} of ${m.total} reopen, and nothing crosses`, `For ${num(gap)} s after the border reopened on ${m.openCount[re]} pods, no message crossed in either direction.`, go(m.phases[re].start_s - 4, 10, "wall")]);
     found.push(["Then everything crosses", `From ${num(mmss(m.dialUntil[re]))} delivery across the border goes from 0% to 100% through those ${m.openCount[re]} pods.`, go(m.dialUntil[re] - 5, 1, "overview")]);
   }
   if (slow && base) found.push(["Outward stays slow", `With ${m.openCount[partial]} of ${m.total} open, inside to outside took a median of ${num(Math.round(slow.p50_ms))} ms against ${num(Math.round(base.p50_ms))} ms before the cut.`, go(m.phases[partial].start_s + 30, 1, "overview")]);

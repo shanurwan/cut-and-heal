@@ -14,6 +14,7 @@ from pathlib import Path
 
 from .analyze import DEFAULTS, border_state, cells, delivery_series, transitions
 from .evidence import Run, load_metric, load_run
+from .report import held_messages, policy_timing, probes
 from .validity import judge
 
 STEP_S = 20  # resolution of the per-pod series
@@ -97,6 +98,10 @@ def run_data(run: Run, index: dict[str, int]) -> dict:
         for c in cs
         if c.window == "steady"
     ]
+    out["held"] = held_messages(run)
+    if run.scenario.cut == "networkpolicy":
+        out["policies"] = policy_timing(run)
+        out["probes"] = [{k: v for k, v in row.items() if k != "errors"} for row in probes(run)]
     return out
 
 
@@ -113,6 +118,7 @@ def write_site_data(run_dirs: list[Path], out: Path, evidence_url: str = "") -> 
         "name": scn.name,
         "title": scn.title,
         "source": scn.source.model_dump() if scn.source else None,
+        "cut": scn.cut,
         "evidence_url": evidence_url,
         "step_s": STEP_S,
         "publish_hz": scn.publish.rate_hz,

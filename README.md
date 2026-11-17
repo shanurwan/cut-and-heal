@@ -50,7 +50,8 @@ Iran, November 2019, replayed against 150 nodes (50 inside, 100 outside). Four v
   with 30 of 50 nodes reconnected.
 
 **[Explore the replay in 3D](https://shanurwan.github.io/cut-and-heal/)**: every pod, every message and
-every shaper of those runs, on a timeline you can scrub.
+every shaper of those runs, on a timeline you can scrub. It also replays a 60 s and a 720 s
+cut, and a cut made with NetworkPolicies.
 
 Seven predictions were written down before the first run; five held and two were refuted.
 The findings, the predictions, what they do not establish, and every withdrawn run are in

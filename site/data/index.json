@@ -1,3 +1,6 @@
 [
-  {"id": "iran-2019-11", "label": "Iran, November 2019"}
+  {"id": "iran-2019-11", "label": "Iran, November 2019"},
+  {"id": "cut-length-60", "label": "Experiment: a 60 s cut"},
+  {"id": "cut-length-720", "label": "Experiment: a 720 s cut"},
+  {"id": "policy-cut", "label": "Experiment: a cut made with NetworkPolicies"}
 ]
