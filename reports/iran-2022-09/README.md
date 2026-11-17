@@ -23,21 +23,17 @@ at the same point in every run, in the last phase:
 | seed 5 | 49, 44, 38, 42, 47, 44, **100%** |
 | seed 6 | 60, 55, 46, 50, 61, 56, **100%** |
 
-`night-2` is the same phase as `night-1`, which the host ran at a median of 51% or less. What differs is
-that it starts about an hour into the run, later than in any other scenario here. Whatever
+`night-2` is the same phase as `night-1`, which the host ran at a median of 51% or less. What
+differs is that it starts about an hour into the run, later than in any other scenario here. Whatever
 loads the host then is not identified: the nodes, the metrics store and log collection are
-candidates. The other failures (V2, V3, V5, V7) followed from the same overload in most
-runs; four runs had a baseline below 99% as well.
+candidates. V2, V5 and V7 failed with the overload; four runs also had a baseline below 99%,
+which is a separate failure, an hour earlier.
 
 ## What this does not establish
 
 Anything about the 2022 outage. The data from the first six phases is not used, because
-runs that fail a rule contribute no numbers.
-
-## What would make it runnable
-
-Finding what saturates the host after an hour, or splitting the two days into separate runs
-of about half an hour each, which every other scenario has stayed within.
+runs that fail a rule contribute no numbers. Every other scenario here runs for about half
+an hour, and none has met this.
 
 ## Provenance
 
