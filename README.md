@@ -90,6 +90,10 @@ other rules withdrew every starved run anyway: starvation restarted pods and del
 before it moved the median latency. The 99th percentile moved first. 150 nodes averaged under
 2 cores but needed about 3. See [reports/lab-cpu](reports/lab-cpu/README.md).
 
+A second outage, Iran in September 2022 with a nightly curfew, has no valid run yet: in all
+six runs the host saturated in the last phase, about an hour in, though the same phase a day
+earlier ran at half load. See [reports/iran-2022-09](reports/iran-2022-09/README.md).
+
 A second scenario asks how few open nodes are enough. In its one valid run a single node in
 fifty carried all cross-border traffic; four runs were withdrawn because reopening the
 border loaded the host past the validity limits. See
